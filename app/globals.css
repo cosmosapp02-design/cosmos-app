@@ -1,26 +1,191 @@
 @import "tailwindcss";
 
+/* ─── CLAUDE / CHATGPT MINIMAL LIGHT THEME ────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --base: #FAF8F5;
+  --surface: #F3F0EA;
+  --surface-solid: #FFFFFF;
+  --elevated: #F0EDE6;
+  --overlay: #FFFFFF;
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --border-accent: rgba(30, 31, 36, 0.2);
+
+  --accent: #1E1F24;
+  --accent-subtle: rgba(30, 31, 36, 0.06);
+
+  --text-primary: #1E1F24;
+  --text-secondary: #52535A;
+  --text-muted: #878890;
+
+  /* Status Colors */
+  --status-online: #10B981;
+  --status-busy: #D97706;
+  --status-offline: #878890;
+  --danger: #DC2626;
+  --warning: #D97706;
+  --success: #10B981;
+
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-overlay: 0 20px 40px rgba(0, 0, 0, 0.12);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--base);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ─── BASE RESET ─────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ─── TYPOGRAPHY SCALE ──────────────────────────────────────────────────── */
+.t-display { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.t-h1      { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
+.t-h2      { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.t-body    { font-size: 13.5px; font-weight: 400; line-height: 1.55; }
+.t-small   { font-size: 12.5px; font-weight: 400; line-height: 1.4; }
+.t-micro   { font-size: 11px;   font-weight: 500; letter-spacing: 0.02em; }
+.t-label   { font-size: 10px;   font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* ─── MINIMAL CARD SYSTEM ───────────────────────────────────────────────── */
+.card {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  border-radius: 14px;
+}
+
+.card-elevated {
+  background: var(--elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-elevated);
+  border-radius: 14px;
+}
+
+.card-interactive {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  border-radius: 14px;
+  transition: border-color 0.15s ease, shadow 0.15s ease, transform 0.15s ease;
+}
+.card-interactive:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* ─── BUTTONS ───────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 10px;
+  padding: 8px 14px;
+  transition: all 0.12s ease;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: #1E1F24;
+  color: #FFFFFF;
+}
+.btn-primary:hover {
+  background: #32333A;
+}
+
+.btn-secondary {
+  background: #FFFFFF;
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+.btn-secondary:hover {
+  background: var(--surface);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+.btn-sm {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 8px;
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  cursor: pointer;
+}
+.btn-icon:hover {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+/* ─── BADGES ────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.badge-neutral { background: rgba(0,0,0,0.05); color: var(--text-secondary); border: 1px solid var(--border); }
+.badge-accent  { background: rgba(30,31,36,0.06); color: var(--text-primary); border: 1px solid rgba(30,31,36,0.12); }
+.badge-success { background: rgba(16,185,129,0.1); color: #047857; border: 1px solid rgba(16,185,129,0.2); }
+.badge-warning { background: rgba(217,119,6,0.1); color: #B45309; border: 1px solid rgba(217,119,6,0.2); }
+.badge-danger  { background: rgba(220,38,38,0.1); color: #B91C1C; border: 1px solid rgba(220,38,38,0.2); }
+
+/* ─── STATUS INDICATOR DOT ──────────────────────────────────────────────── */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-online  { background: var(--status-online); }
+.status-busy    { background: var(--status-busy); }
+.status-offline { background: var(--status-offline); }
+
+/* ─── SCROLLBARS ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
