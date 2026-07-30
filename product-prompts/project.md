@@ -60,75 +60,45 @@ A hybrid cloud/local multi-agent workspace combining a **Vercel-hosted Web SaaS 
 ```
 
 1. **Vercel Cloud Web UI**: Hosted globally on Vercel (`https://app.cosmos.ai`). Accessible from desktop or mobile phone anywhere in the world.
-2. **Cloud Auth & Database**: Cloud database (Supabase / PostgreSQL) persists user accounts, organizations, channel message history, Kanban tickets, agent profiles, and file metadata.
+2. **Bring Your Own Keys (BYOK) & Per-Agent Model Assignment**:
+   - Users insert their own API keys (OpenAI, Anthropic, Gemini, DeepSeek, or local Ollama endpoint).
+   - Keys are encrypted locally in `~/.cosmos/vault.json`.
+   - **Per-Agent Model Selection**: Each agent can be configured with a specific LLM model (e.g. `Dev-Bot` ➔ `claude-3-5-sonnet`, `Alex` ➔ `gpt-4o`, `QA-Guard` ➔ `gemini-2.5-flash`).
 3. **Local Engine Daemon & Secure WSS Tunnel**:
-   - Local daemon runs on the user's computer (`packages/daemon`).
    - Outbound WebSocket tunnel connects the daemon to the Vercel cloud relay server behind NAT/firewalls.
-   - **Online / Offline Telemetry**:
-     - `Engine Online`: Local PC is running; real-time native sandbox code execution and terminal streams active.
-     - `Agents Offline`: Local PC is offline/sleeping; cloud DB still provides full access to read chat history, project files, and ticket boards.
-4. **Mobile Phone Optimization (< 768px Viewports)**:
-   - On mobile devices, complex desktop interfaces (Kanban boards, Gantt timelines, React Flow Org canvases) automatically collapse into a focused **Mobile Workspace Chat Hub**.
-   - Mobile users can chat 1:1 or in group channels with agents and receive real-time push notifications for one-tap **Report Mode** approvals.
+   - `Engine Online` / `Agents Offline` live telemetry.
 
 ---
 
-## 3. FRONTEND LAYOUT & NAVIGATION
-Collapsible primary left sidebar with 5 primary views + bottom status:
+## 3. HERMES-INSPIRED COSMOS AGENT BACKBONE FRAMEWORK
 
-- **Navigation Items**:
-  1. **Workspace**: Slack/Teams enterprise communication hub (channels, DMs, rich work artifact cards, message reactions).
-  2. **Files**: Internal company memory folder tree (codebases, PRDs, QA reports, file preview modal).
-  3. **Project Management**: Enterprise suite featuring **Board** (Kanban columns with SVG status icons & multi-filters), **Table / List** (dense spreadsheet view), **Agent Workload** (capacity allocation meters per agent), **Timeline / Gantt**, and **Calendar**.
-  4. **AI Directory**: Talent repository card grid (`SOUL.md` profiles, `SKILL.md` learned workflows).
-  5. **Org Hierarchy**: Interactive React Flow command canvas (`@xyflow/react`).
-- **Bottom Status**: `Engine Online / Agents Offline` daemon WebSocket connection indicator.
+The core agent framework powers all digital employees across the organization:
 
----
-
-## 4. ZERO-FRICTION NATIVE OS SANDBOX & GOVERNANCE
-
-### 1. Zero-Friction Native Kernel Sandbox (No Docker Required)
-- **Eliminates Docker Friction**: Users do **NOT** need to install or run Docker Desktop.
-- **Native Kernel Policies**:
-  - **macOS**: `sandbox-exec` / Apple Seatbelt framework.
-  - **Windows**: Windows AppContainer & Job Objects.
-  - **Linux**: `bwrap` (Bubblewrap) / `seccomp`.
-- **Strict Directory Scoping**: Kernel security policies strictly constrain agent file access to the designated `/my-project` directory, completely blocking access to `~/.ssh`, `~/.aws`, system root drives, or unauthorized network ports.
-- **Microsecond File Lock Queue**: Daemon manages in-memory file mutex queues (`async-mutex`) to prevent concurrent agent race conditions.
-
-### 2. AST Knowledge Engine (Token Optimization)
-- Tree-sitter parser (`graph.json`) injecting exact code syntax nodes instead of raw file dumps, saving up to 70% tokens.
-
-### 3. Governance Systems
-- **Report Mode**: Intercepts high-risk operations (terminal scripts, file writes, external API calls) and pauses execution for human approval in UI (mobile push or desktop modal).
-- **Goal Mode**: Autonomous closed-loop execution inside sandbox boundaries.
-
-### 4. Model Context Protocol (MCP)
-- `@modelcontextprotocol/sdk` connecting Google Workspace, Figma, and Playwright headless browser for self-healing visual test loops.
+1. **Self-Learning & Skill Persistence (`SKILL.md`)**:
+   - After completing execution tasks, agents synthesize their workflow steps into markdown skill recipes stored in `~/.cosmos/agents/<agent_name>/`.
+   - On subsequent tasks, active `SKILL.md` files are injected into prompt context.
+2. **Token-Utilization Awareness**:
+   - Integrates the Tree-sitter AST syntax parser (`graph.json`) to supply precise function/class context instead of raw file dumps, reducing token costs by up to 70%.
+3. **Autonomous Project Management Tool Integration**:
+   - Agents autonomously create, update, and close Kanban tickets, add subtasks, adjust point estimates, and post progress comments directly to the website PM suite.
+4. **Inter-Agent Collaboration & 5-Message Spiral Circuit Breaker**:
+   - Agents collaborate across chains of command (e.g. Manager ➔ Coder ➔ QA).
+   - **Infinite Loop Safeguard**: If inter-agent communication reaches **5 turns without human intervention**, execution automatically pauses and notifies the user in the UI: *"Agent discussion limit reached (5 turns). Review thread to approve or guide next step."*
 
 ---
 
-## 5. REPOSITORY STRUCTURE
-```
-/apps
-  /web           # Next.js 14 Web UI (Vercel Deployed)
-/packages
-  /daemon        # Local Engine Daemon & WSS Relay Client
-  /sandbox       # Native OS Kernel Sandbox (sandbox-exec / AppContainer)
-  /ast-indexer   # Tree-sitter Parser & AST Graph Generator
-  /mcp-client    # MCP Tool Router & Credential Store
-```
+## 4. FRONTEND LAYOUT & NAVIGATION
+Collapsible primary left sidebar with 5 primary views:
+
+1. **Workspace**: Slack/Teams enterprise communication hub (channels, DMs, work artifact cards, message reactions).
+2. **Files**: Internal company memory folder tree (codebases, PRDs, QA reports, file preview modal).
+3. **Project Management**: Enterprise suite featuring **Board** (Kanban columns with SVG status icons & multi-filters), **Table / List** (dense spreadsheet view), **Agent Workload** (capacity allocation meters per agent), **Timeline / Gantt**, and **Calendar**.
+4. **AI Directory**: Talent repository card grid (`SOUL.md` profiles, `SKILL.md` learned workflows, per-agent model assignment selector).
+5. **Org Hierarchy**: Interactive React Flow command canvas (`@xyflow/react`).
 
 ---
 
-## 6. FEASIBILITY & TIMELINE
-
-### Feasibility: High (9.5/10)
-- Zero external software dependencies for end users. Runs natively on macOS, Windows, and Linux out of the box.
-
-### Estimated Project Timeline (6 to 8 Weeks)
-- **Weeks 1–2 (Cloud DB & Daemon Core)**: Setup Supabase Auth/DB, build local Node.js daemon, and establish outbound WSS relay tunnel from Vercel to local daemon.
-- **Weeks 3–4 (Native OS Sandbox & Governance)**: Implement `sandbox-exec` (Mac) / `AppContainer` (Windows) kernel wrappers, directory boundary enforcement, and Report Mode approval popups.
-- **Weeks 5–6 (Agent LLM & MCP Integration)**: Connect Vercel AI SDK / LangChain agent execution loops, `SOUL.md`/`SKILL.md` persistence, and MCP tools (Playwright).
-- **Weeks 7–8 (Mobile Responsive Polish & Hardening)**: Finalize mobile chat hub UI, push notification triggers, offline status fallbacks, and launch testing.
+## 5. ZERO-FRICTION NATIVE OS SANDBOX & GOVERNANCE
+- **Native OS Kernel Sandbox**: macOS `sandbox-exec` / Windows AppContainer.
+- **Report Mode**: Intercepts high-risk shell commands & file writes for human approval.
+- **Model Context Protocol (MCP)**: `@modelcontextprotocol/sdk` (Google Workspace, Figma, Playwright visual QA).
