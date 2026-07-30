@@ -50,7 +50,8 @@ let config = loadConfig();
 if (!config.paired) {
   const pairingCode = `cosmos_pair_${Math.random().toString(36).substring(2, 8)}`;
   config.pairingCode = pairingCode;
-  const pairingUrl = `http://localhost:3000/pair?code=${pairingCode}`;
+  const baseUrl = process.env.COSMOS_WEB_URL || "https://cosmos-app-iota.vercel.app";
+  const pairingUrl = `${baseUrl}/pair?code=${pairingCode}`;
 
   console.log(`🔑 Device Unpaired. Opening browser for user setup: ${pairingUrl}`);
 
