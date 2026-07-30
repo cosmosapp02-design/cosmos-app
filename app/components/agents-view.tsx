@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, X, Check, Code2, Calendar, FileText, Megaphone, Triangle, Server, FlaskConical, Eye, GitMerge, Bot, UserPlus, Key, Cpu, Sparkles, RefreshCw, ShieldAlert,
@@ -8,6 +8,8 @@ import {
 import AgentAvatar from "./agent-avatar";
 import { useToast } from "./toast";
 import APIVaultModal from "./api-vault-modal";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../lib/auth-context";
 
 export interface Agent {
   id: string;
@@ -25,68 +27,9 @@ export interface Agent {
   stats: { tasksCompleted: number; tokensSaved: string; uptime: string };
 }
 
-const initialAgents: Agent[] = [
-  {
-    id: "1",
-    name: "Alex",
-    role: "Product Manager",
-    color: "#1E1F24",
-    status: "online",
-    avatar: "A",
-    primaryModel: "gpt-4o-2024-11-20",
-    backupModel: "claude-3-5-sonnet",
-    description: "Orchestrates sprint goals, writes PRDs, and prioritizes user features.",
-    soul: "I am Alex, a strategic product manager who transforms vague ideas into actionable roadmaps. I think in user stories, prioritize ruthlessly, and always keep the north star metric in focus.",
-    skills: [
-      { name: "PRD Generation", icon: "FileText", proficiency: 94 },
-      { name: "Sprint Planning", icon: "Calendar", proficiency: 88 },
-      { name: "User Research", icon: "Eye", proficiency: 82 },
-    ],
-    currentTask: "Writing Sprint 4 PRD & Auth spec",
-    stats: { tasksCompleted: 47, tokensSaved: "142k", uptime: "99.8%" },
-  },
-  {
-    id: "2",
-    name: "Dev-Bot",
-    role: "Senior Coder",
-    color: "#1E1F24",
-    status: "busy",
-    avatar: "D",
-    primaryModel: "gemini-3.6-flash-lite",
-    backupModel: "claude-3-5-sonnet",
-    description: "Writes full-stack code, executes refactors, and builds Next.js/TypeScript modules.",
-    soul: "I am Dev-Bot, a senior software architect specializing in TypeScript, Next.js, and clean code. I write modular, well-tested code and strictly follow design systems.",
-    skills: [
-      { name: "TypeScript / React", icon: "Code2", proficiency: 98 },
-      { name: "AST Indexing", icon: "GitMerge", proficiency: 92 },
-      { name: "API Design", icon: "Server", proficiency: 90 },
-    ],
-    currentTask: "Implementing JWT authentication middleware",
-    stats: { tasksCompleted: 112, tokensSaved: "389k", uptime: "99.9%" },
-  },
-  {
-    id: "3",
-    name: "QA-Guard",
-    role: "QA Inspector",
-    color: "#1E1F24",
-    status: "online",
-    avatar: "Q",
-    primaryModel: "gemini-2.5-flash",
-    backupModel: "gpt-4o-mini",
-    description: "Runs Playwright E2E test suites, audits visual regressions, and verifies acceptance criteria.",
-    soul: "I am QA-Guard, a relentless quality assurance engineer. I write automated Playwright test suites, inspect edge cases, and catch regressions before code hits production.",
-    skills: [
-      { name: "Playwright E2E", icon: "FlaskConical", proficiency: 96 },
-      { name: "Visual Testing", icon: "Eye", proficiency: 91 },
-      { name: "Security Audit", icon: "Server", proficiency: 87 },
-    ],
-    currentTask: "Auditing authentication flow Playwright specs",
-    stats: { tasksCompleted: 83, tokensSaved: "210k", uptime: "99.7%" },
-  },
-];
-
 export default function AgentsView() {
-  const [agents, setAgents] = useState<Agent[]>(initialAgents);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [vaultModalOpen, setVaultModalOpen] = useState(false);
@@ -97,42 +40,101 @@ export default function AgentsView() {
   const [newPrimaryModel, setNewPrimaryModel] = useState("gemini-3.6-flash-lite");
   const [newBackupModel, setNewBackupModel] = useState("claude-3-5-sonnet");
 
+  const { user } = useAuth();
   const { addToast } = useToast();
 
-  const handleUpdateModels = (agentId: string, primary: string, backup: string) => {
+  const fetchUserAgents = useCallback(async () => {
+    setLoading(true);
+    try {
+      if (!user) {
+        setAgents([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("agents")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const mapped: Agent[] = data.map((item: any) => ({
+          id: item.id,
+          name: item.name,
+          role: item.role,
+          color: item.avatar_color || "#1E1F24",
+          status: "online",
+          avatar: item.name.charAt(0).toUpperCase(),
+          description: item.purpose || `${item.role} AI employee.`,
+          soul: item.purpose || `I am ${item.name}, operating as ${item.role}.`,
+          primaryModel: item.primary_model || "gemini-3.6-flash-lite",
+          backupModel: item.backup_model || "claude-3-5-sonnet",
+          skills: Array.isArray(item.skills)
+            ? item.skills.map((s: string) => ({ name: s, icon: "Code2", proficiency: 90 }))
+            : [{ name: "Task Execution", icon: "Code2", proficiency: 90 }],
+          stats: { tasksCompleted: 1, tokensSaved: "4k", uptime: "100%" },
+        }));
+        setAgents(mapped);
+      } else {
+        setAgents([]);
+      }
+    } catch (err: any) {
+      setAgents([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchUserAgents();
+  }, [fetchUserAgents]);
+
+  const handleUpdateModels = async (agentId: string, primary: string, backup: string) => {
     setAgents((prev) =>
       prev.map((a) => (a.id === agentId ? { ...a, primaryModel: primary, backupModel: backup } : a))
     );
+
+    if (user) {
+      try {
+        await supabase
+          .from("agents")
+          .update({ primary_model: primary, backup_model: backup })
+          .eq("id", agentId)
+          .eq("user_id", user.id);
+      } catch (e) {}
+    }
   };
 
-  const handleCreateAgent = () => {
+  const handleCreateAgent = async () => {
     if (!newName.trim() || !newRole.trim()) return;
 
-    const created: Agent = {
-      id: `${Date.now()}`,
-      name: newName,
-      role: newRole,
-      color: "#1E1F24",
-      status: "online",
-      avatar: newName.charAt(0).toUpperCase(),
-      description: newDesc || `${newRole} AI worker.`,
-      soul: newSoul || `I am ${newName}, a ${newRole}.`,
-      primaryModel: newPrimaryModel || "gemini-3.6-flash-lite",
-      backupModel: newBackupModel || "claude-3-5-sonnet",
-      skills: [
-        { name: "Task Execution", icon: "Code2", proficiency: 85 },
-        { name: "PRD Analysis", icon: "FileText", proficiency: 80 },
-      ],
-      stats: { tasksCompleted: 0, tokensSaved: "0k", uptime: "100%" },
-    };
+    try {
+      const newAgentObj = {
+        name: newName,
+        role: newRole,
+        purpose: newDesc || newSoul || `${newRole} AI worker.`,
+        skills: ["TypeScript", "API Integration", "PRDs"],
+        avatar_color: "#1E1F24",
+        primary_model: newPrimaryModel || "gemini-3.6-flash-lite",
+        backup_model: newBackupModel || "claude-3-5-sonnet",
+        user_id: user?.id,
+      };
 
-    setAgents((prev) => [...prev, created]);
-    setCreateModalOpen(false);
-    setNewName("");
-    setNewRole("");
-    setNewDesc("");
-    setNewSoul("");
-    addToast(`Agent ${created.name} (${created.role}) hired!`, "success");
+      const { data, error } = await supabase.from("agents").insert([newAgentObj]).select();
+      if (error) throw error;
+
+      fetchUserAgents();
+      setCreateModalOpen(false);
+      setNewName("");
+      setNewRole("");
+      setNewDesc("");
+      setNewSoul("");
+      addToast(`Agent ${newName} (${newRole}) hired!`, "success");
+    } catch (err: any) {
+      addToast(err.message || "Failed to create agent.", "danger");
+    }
   };
 
   return (
@@ -142,7 +144,7 @@ export default function AgentsView() {
         <div>
           <h1 className="text-sm font-bold text-[#1E1F24]">AI Talent Directory</h1>
           <p className="text-[11px] text-[#878890]">
-            Freeform model inputs, backup failover models, and BYOK Enterprise API Vault
+            Your private AI organization workforce (Synced with Supabase DB)
           </p>
         </div>
 
@@ -166,87 +168,112 @@ export default function AgentsView() {
 
       {/* Agents Card Grid */}
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {agents.map((agent) => (
-            <motion.div
-              key={agent.id}
-              layout
-              className="card bg-white p-5 space-y-4 relative flex flex-col justify-between"
+        {loading ? (
+          <div className="h-full flex flex-col items-center justify-center text-xs text-[#878890]">
+            Loading your organization agents...
+          </div>
+        ) : agents.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center max-w-sm mx-auto space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-[#1E1F24] text-white flex items-center justify-center mx-auto shadow-sm">
+              <Bot size={24} />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[#1E1F24]">Clean Slate Workspace</h3>
+              <p className="text-xs text-[#72737A] mt-1 leading-relaxed">
+                You have 0 agents in your company. Hire your first AI employee to start executing work!
+              </p>
+            </div>
+            <button
+              onClick={() => setCreateModalOpen(true)}
+              className="btn btn-primary rounded-xl px-4 py-2 text-xs font-semibold"
             >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <AgentAvatar name={agent.name} size={40} />
+              <Plus size={14} />
+              <span>Hire First AI Employee</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {agents.map((agent) => (
+              <motion.div
+                key={agent.id}
+                layout
+                className="card bg-white p-5 space-y-4 relative flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <AgentAvatar name={agent.name} size={40} />
+                      <div>
+                        <h3 className="text-sm font-bold text-[#1E1F24]">{agent.name}</h3>
+                        <p className="text-[11px] text-[#72737A] font-medium">{agent.role}</p>
+                      </div>
+                    </div>
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm" />
+                  </div>
+
+                  <p className="text-xs text-[#52535A] leading-relaxed mb-4">
+                    {agent.description}
+                  </p>
+
+                  {/* Freeform Primary & Backup Model Inputs */}
+                  <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] space-y-2 mb-4">
                     <div>
-                      <h3 className="text-sm font-bold text-[#1E1F24]">{agent.name}</h3>
-                      <p className="text-[11px] text-[#72737A] font-medium">{agent.role}</p>
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-[#1E1F24] uppercase mb-0.5">
+                        <Cpu size={11} className="text-emerald-600" />
+                        <span>PRIMARY MODEL</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={agent.primaryModel}
+                        onChange={(e) => handleUpdateModels(agent.id, e.target.value, agent.backupModel)}
+                        placeholder="e.g. gemini-3.6-flash-lite"
+                        className="w-full px-2.5 py-1 rounded-lg bg-white border border-[rgba(0,0,0,0.12)] font-mono text-xs text-[#1E1F24] outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-[#72737A] uppercase mb-0.5">
+                        <RefreshCw size={11} className="text-amber-600" />
+                        <span>BACKUP FAILOVER MODEL</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={agent.backupModel}
+                        onChange={(e) => handleUpdateModels(agent.id, agent.primaryModel, e.target.value)}
+                        placeholder="e.g. claude-3-5-sonnet"
+                        className="w-full px-2.5 py-1 rounded-lg bg-white border border-[rgba(0,0,0,0.12)] font-mono text-xs text-[#52535A] outline-none"
+                      />
                     </div>
                   </div>
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm" />
-                </div>
 
-                <p className="text-xs text-[#52535A] leading-relaxed mb-4">
-                  {agent.description}
-                </p>
-
-                {/* Freeform Primary & Backup Model Inputs */}
-                <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] space-y-2 mb-4">
-                  <div>
-                    <div className="flex items-center gap-1 text-[10px] font-bold text-[#1E1F24] uppercase mb-0.5">
-                      <Cpu size={11} className="text-emerald-600" />
-                      <span>PRIMARY MODEL</span>
+                  {/* Skills */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-[#878890] uppercase tracking-wider">
+                      Learned Workflows & Skills
                     </div>
-                    <input
-                      type="text"
-                      value={agent.primaryModel}
-                      onChange={(e) => handleUpdateModels(agent.id, e.target.value, agent.backupModel)}
-                      placeholder="e.g. gemini-3.6-flash-lite"
-                      className="w-full px-2.5 py-1 rounded-lg bg-white border border-[rgba(0,0,0,0.12)] font-mono text-xs text-[#1E1F24] outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-1 text-[10px] font-bold text-[#72737A] uppercase mb-0.5">
-                      <RefreshCw size={11} className="text-amber-600" />
-                      <span>BACKUP FAILOVER MODEL</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {agent.skills.map((sk) => (
+                        <span key={sk.name} className="px-2 py-0.5 rounded-lg bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] text-[10.5px] font-medium text-[#1E1F24]">
+                          {sk.name}
+                        </span>
+                      ))}
                     </div>
-                    <input
-                      type="text"
-                      value={agent.backupModel}
-                      onChange={(e) => handleUpdateModels(agent.id, agent.primaryModel, e.target.value)}
-                      placeholder="e.g. claude-3-5-sonnet"
-                      className="w-full px-2.5 py-1 rounded-lg bg-white border border-[rgba(0,0,0,0.12)] font-mono text-xs text-[#52535A] outline-none"
-                    />
                   </div>
                 </div>
 
-                {/* Skills */}
-                <div className="space-y-1.5">
-                  <div className="text-[10px] font-bold text-[#878890] uppercase tracking-wider">
-                    Learned Workflows & Skills
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {agent.skills.map((sk) => (
-                      <span key={sk.name} className="px-2 py-0.5 rounded-lg bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] text-[10.5px] font-medium text-[#1E1F24]">
-                        {sk.name} ({sk.proficiency}%)
-                      </span>
-                    ))}
-                  </div>
+                <div className="pt-3 border-t border-[rgba(0,0,0,0.06)] flex items-center justify-between text-[11px] text-[#878890]">
+                  <span>100% Active</span>
+                  <button
+                    onClick={() => setSelectedAgent(agent)}
+                    className="text-xs font-semibold text-[#1E1F24] hover:underline"
+                  >
+                    View SOUL.md Excerpt ➔
+                  </button>
                 </div>
-              </div>
-
-              <div className="pt-3 border-t border-[rgba(0,0,0,0.06)] flex items-center justify-between text-[11px] text-[#878890]">
-                <span>{agent.stats.tasksCompleted} Tasks Done</span>
-                <button
-                  onClick={() => setSelectedAgent(agent)}
-                  className="text-xs font-semibold text-[#1E1F24] hover:underline"
-                >
-                  View SOUL.md Excerpt ➔
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* API Vault Modal */}
