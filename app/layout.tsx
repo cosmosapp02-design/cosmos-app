@@ -16,6 +16,11 @@ export const metadata: Metadata = {
   title: "Cosmos — Visual AI Company Management",
   description:
     "Build, manage, and grow your own AI organization. Cosmos lets anyone create a company of specialized AI employees that collaborate, learn, and execute real work.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default function RootLayout({

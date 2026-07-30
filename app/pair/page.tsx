@@ -58,9 +58,11 @@ function PairPageContent() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#FAF8F5] text-[#1E1F24] p-6 select-none">
       <div className="w-full max-w-md bg-white border border-[rgba(0,0,0,0.12)] rounded-3xl p-8 shadow-xl text-center space-y-6">
-        <div className="w-14 h-14 rounded-2xl bg-[#1E1F24] text-white flex items-center justify-center mx-auto shadow-sm">
-          <Laptop size={28} />
-        </div>
+        <img
+          src="/logo.svg"
+          alt="Cosmos AI Logo"
+          className="w-14 h-14 rounded-2xl shadow-md mx-auto object-cover"
+        />
 
         <div>
           <h1 className="text-xl font-bold text-[#1E1F24]">Pair Device with Cosmos AI</h1>

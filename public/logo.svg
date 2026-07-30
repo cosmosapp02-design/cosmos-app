@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="cosmosGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E1F24" />
+      <stop offset="50%" stop-color="#2D2E36" />
+      <stop offset="100%" stop-color="#0F1013" />
+    </linearGradient>
+    <linearGradient id="orbitGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="50%" stop-color="#8B5CF6" />
+      <stop offset="100%" stop-color="#EC4899" />
+    </linearGradient>
+    <linearGradient id="coreStar" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#E0E7FF" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Dark Container Rounded Square -->
+  <rect width="512" height="512" rx="128" fill="url(#cosmosGradient)" />
+
+  <!-- Outer Orbital Ring -->
+  <circle cx="256" cy="256" r="160" fill="none" stroke="url(#orbitGlow)" stroke-width="18" stroke-dasharray="720 180" opacity="0.9" />
+
+  <!-- Inner Interlocking Orbit Loop -->
+  <ellipse cx="256" cy="256" rx="140" ry="70" fill="none" stroke="url(#orbitGlow)" stroke-width="14" transform="rotate(-35 256 256)" opacity="0.85" />
+  <ellipse cx="256" cy="256" rx="140" ry="70" fill="none" stroke="url(#orbitGlow)" stroke-width="14" transform="rotate(35 256 256)" opacity="0.85" />
+
+  <!-- Core Geometric Celestial Starburst -->
+  <path d="M256 128 L278 234 L384 256 L278 278 L256 384 L234 278 L128 256 L234 234 Z" fill="url(#coreStar)" />
+  
+  <!-- Diagonal Micro-Stars -->
+  <circle cx="340" cy="172" r="12" fill="#8B5CF6" />
+  <circle cx="172" cy="340" r="12" fill="#6366F1" />
+</svg>

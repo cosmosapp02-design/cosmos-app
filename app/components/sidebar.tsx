@@ -81,9 +81,11 @@ export default function Sidebar({
         <div className="flex items-center justify-between">
           {!collapsed && (
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-[#1E1F24] text-white flex items-center justify-center font-bold text-xs">
-                C
-              </div>
+              <img
+                src="/logo.svg"
+                alt="Cosmos AI Logo"
+                className="w-7 h-7 rounded-lg shadow-sm shrink-0 object-cover"
+              />
               <div>
                 <div className="t-small font-bold" style={{ color: "var(--text-primary)" }}>
                   Cosmos AI

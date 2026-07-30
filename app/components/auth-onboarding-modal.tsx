@@ -120,9 +120,11 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
           {/* Top Brand Header with Top-Right Close Button */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-2xl bg-[#1E1F24] text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                C
-              </div>
+              <img
+                src="/logo.svg"
+                alt="Cosmos AI Logo"
+                className="w-9 h-9 rounded-2xl shadow-sm shrink-0 object-cover"
+              />
               <div>
                 <h2 className="text-sm font-bold text-[#1E1F24]">Cosmos AI Platform</h2>
                 <p className="text-[11px] text-[#72737A]">Build & Manage Your AI Organization</p>
