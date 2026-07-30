@@ -25,7 +25,7 @@ const navItems: { id: ViewType; label: string; icon: typeof MessageSquare }[] = 
   { id: "dashboard", label: "Workspace", icon: MessageSquare },
   { id: "projects", label: "Files", icon: Folder },
   { id: "kanban", label: "Project Management", icon: FolderKanban },
-  { id: "agents", label: "AI Directory", icon: Users },
+  { id: "agents", label: "AI Agents", icon: Users },
   { id: "orgchart", label: "Org Hierarchy", icon: Network },
 ];
 
@@ -76,7 +76,7 @@ export default function Sidebar({
         borderRight: "1px solid var(--border)",
       }}
     >
-      {/* Brand & New Thread Button */}
+      {/* Brand & New Command Button */}
       <div className="p-3.5 flex flex-col gap-3 shrink-0" style={{ borderBottom: "1px solid var(--border)" }}>
         <div className="flex items-center justify-between">
           {!collapsed && (
@@ -112,7 +112,7 @@ export default function Sidebar({
             className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white border border-[rgba(0,0,0,0.1)] text-xs font-semibold text-[#1E1F24] hover:bg-[#FAF8F5] transition-all shadow-2xs"
           >
             <Plus size={14} />
-            <span>New Task</span>
+            <span>Command</span>
           </button>
         )}
       </div>

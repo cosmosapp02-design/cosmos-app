@@ -48,15 +48,17 @@ export interface ChannelItem {
 export default function DashboardView() {
   const { user, orgName } = useAuth();
   const [channels, setChannels] = useState<ChannelItem[]>([]);
-  const [activeChannelId, setActiveChannelId] = useState<string>("general");
+  const [activeChannelId, setActiveChannelId] = useState<string>("");
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const [interAgentTurns, setInterAgentTurns] = useState<number>(0);
-  const [discussionPaused, setDiscussionPaused] = useState<boolean>(false);
+  // Create Channel Modal state
+  const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelTopic, setNewChannelTopic] = useState("");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
 
@@ -80,9 +82,7 @@ export default function DashboardView() {
           unread: 0,
         }));
         setChannels(mapped);
-        if (!mapped.some((c) => c.id === activeChannelId)) {
-          setActiveChannelId(mapped[0].id);
-        }
+        setActiveChannelId((prev) => (prev && mapped.some((c) => c.id === prev) ? prev : mapped[0].id));
       } else {
         // Auto-create default channels for new user
         const defaultChannels = [
@@ -105,7 +105,7 @@ export default function DashboardView() {
             unread: 0,
           }));
           setChannels(mapped);
-          setActiveChannelId(mapped[0].id);
+          setActiveChannelId((prev) => (prev && mapped.some((c) => c.id === prev) ? prev : mapped[0].id));
         } else {
           // Fallback in-memory channels
           const fallback = [
@@ -120,7 +120,7 @@ export default function DashboardView() {
     } finally {
       setLoading(false);
     }
-  }, [user, activeChannelId]);
+  }, [user]);
 
   const fetchChannelMessages = useCallback(async () => {
     if (!user || !activeChannelId) return;
@@ -160,9 +160,55 @@ export default function DashboardView() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, activeChannelId]);
 
+  const handleCreateChannel = async () => {
+    if (!newChannelName.trim()) return;
+
+    const formattedName = newChannelName.toLowerCase().replace(/\s+/g, "-");
+    const newChanObj = {
+      name: formattedName,
+      type: "group",
+      topic: newChannelTopic || "Channel topic",
+      user_id: user?.id,
+    };
+
+    try {
+      const { data, error } = await supabase.from("channels").insert([newChanObj]).select();
+      if (!error && data && data.length > 0) {
+        const createdItem: ChannelItem = {
+          id: data[0].id,
+          name: data[0].name,
+          type: "group",
+          topic: data[0].topic,
+          agents: ["Dev-Bot"],
+          unread: 0,
+        };
+        setChannels((prev) => [...prev, createdItem]);
+        setActiveChannelId(createdItem.id);
+        addToast(`Channel #${formattedName} created!`, "success");
+      } else {
+        const localItem: ChannelItem = {
+          id: `c-${Date.now()}`,
+          name: formattedName,
+          type: "group",
+          topic: newChannelTopic || "Channel topic",
+          agents: ["Dev-Bot"],
+          unread: 0,
+        };
+        setChannels((prev) => [...prev, localItem]);
+        setActiveChannelId(localItem.id);
+        addToast(`Channel #${formattedName} created!`, "success");
+      }
+    } catch (e) {
+    } finally {
+      setCreateChannelModalOpen(false);
+      setNewChannelName("");
+      setNewChannelTopic("");
+    }
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || !activeChannelId) return;
 
     const userText = input.trim();
     setInput("");
@@ -204,7 +250,7 @@ export default function DashboardView() {
         sender: "Dev-Bot",
         role: "Senior AI Engineer",
         avatarColor: "#1E1F24",
-        text: `Received: "${userText}". I am executing this task in your local engine daemon sandbox.`,
+        text: `Received: "${userText}". Executing in local engine daemon sandbox.`,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
@@ -229,7 +275,7 @@ export default function DashboardView() {
     }, 1200);
   };
 
-  const channelObj = channels.find((c) => c.id === activeChannelId) || {
+  const channelObj = channels.find((c) => c.id === activeChannelId) || channels[0] || {
     id: "general",
     name: "general",
     type: "group" as const,
@@ -253,8 +299,17 @@ export default function DashboardView() {
 
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
           <div>
-            <div className="text-[10px] font-bold text-[#878890] uppercase tracking-wider px-2 mb-1.5">
-              CHANNELS
+            <div className="flex items-center justify-between px-2 mb-1.5">
+              <div className="text-[10px] font-bold text-[#878890] uppercase tracking-wider">
+                CHANNELS
+              </div>
+              <button
+                onClick={() => setCreateChannelModalOpen(true)}
+                className="p-1 rounded-lg text-[#878890] hover:text-[#1E1F24] hover:bg-black/5 transition-all"
+                title="Create New Channel"
+              >
+                <Plus size={14} />
+              </button>
             </div>
             <div className="space-y-0.5">
               {channels.map((ch) => (
@@ -353,6 +408,70 @@ export default function DashboardView() {
           </div>
         </form>
       </div>
+
+      {/* Create Channel Modal */}
+      <AnimatePresence>
+        {createChannelModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={() => setCreateChannelModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              className="w-full max-w-md bg-white border border-[rgba(0,0,0,0.12)] rounded-3xl p-6 shadow-xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-[rgba(0,0,0,0.08)]">
+                <h2 className="text-sm font-bold text-[#1E1F24]">Create Workspace Channel</h2>
+                <button onClick={() => setCreateChannelModalOpen(false)} className="btn-icon">
+                  <X size={15} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">CHANNEL NAME</label>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5]">
+                    <Hash size={14} className="text-[#878890]" />
+                    <input
+                      type="text"
+                      value={newChannelName}
+                      onChange={(e) => setNewChannelName(e.target.value)}
+                      placeholder="e.g. backend-squad or product-ideas"
+                      className="bg-transparent outline-none w-full text-xs text-[#1E1F24] placeholder-[#878890]"
+                      required
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">TOPIC & DESCRIPTION</label>
+                  <input
+                    type="text"
+                    value={newChannelTopic}
+                    onChange={(e) => setNewChannelTopic(e.target.value)}
+                    placeholder="e.g. Backend API development & architecture"
+                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] text-xs outline-none focus:border-[#1E1F24]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setCreateChannelModalOpen(false)} className="btn btn-secondary flex-1 justify-center">
+                  Cancel
+                </button>
+                <button onClick={handleCreateChannel} className="btn btn-primary flex-1 justify-center">
+                  Create Channel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
