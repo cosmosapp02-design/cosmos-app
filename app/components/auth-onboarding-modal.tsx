@@ -338,7 +338,10 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
                 </p>
               </div>
               <button
-                onClick={onClose}
+                onClick={() => {
+                  onClose();
+                  window.location.href = "/";
+                }}
                 className="w-full py-2.5 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold hover:bg-[#32333A] transition-all"
               >
                 Open My Workspace

@@ -35,10 +35,10 @@ function PairPageContent() {
       };
     } catch (err) {}
 
-    // Instant redirect to workspace
+    // Instant redirect to workspace dashboard
     setTimeout(() => {
       window.location.href = "/";
-    }, 800);
+    }, 600);
   }, [user, code, orgName]);
 
   useEffect(() => {
@@ -48,6 +48,12 @@ function PairPageContent() {
       setAuthModalOpen(false);
     }
   }, [user]);
+
+  const handleModalClose = () => {
+    setAuthModalOpen(false);
+    // Directly redirect to workspace
+    window.location.href = "/";
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#FAF8F5] text-[#1E1F24] p-6 select-none">
@@ -93,7 +99,10 @@ function PairPageContent() {
             )}
 
             <button
-              onClick={handleApprovePairing}
+              onClick={() => {
+                handleApprovePairing();
+                window.location.href = "/";
+              }}
               className="w-full py-3 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-[#32333A] transition-all shadow-sm"
             >
               <span>{user ? "Open My Workspace" : "Sign In to Pair Device"}</span>
@@ -105,10 +114,7 @@ function PairPageContent() {
 
       <AuthOnboardingModal
         isOpen={authModalOpen}
-        onClose={() => {
-          setAuthModalOpen(false);
-          if (user) handleApprovePairing();
-        }}
+        onClose={handleModalClose}
         onAgentCreated={() => {
           handleApprovePairing();
         }}
