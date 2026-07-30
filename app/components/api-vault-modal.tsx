@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Key, X, CheckCircle2, ShieldCheck, Cpu, Lock, Sparkles, Server } from "lucide-react";
+import { Key, X, CheckCircle2, ShieldCheck, Cpu, Server, Layers, Cloud } from "lucide-react";
 import { useToast } from "./toast";
 
 interface APIVaultModalProps {
@@ -10,17 +10,14 @@ interface APIVaultModalProps {
   onClose: () => void;
 }
 
-export interface APIKeys {
-  openaiKey: string;
-  anthropicKey: string;
-  geminiKey: string;
-  ollamaUrl: string;
-}
-
 export default function APIVaultModal({ isOpen, onClose }: APIVaultModalProps) {
   const [openaiKey, setOpenaiKey] = useState("");
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
+  const [nvidiaNimKey, setNvidiaNimKey] = useState("");
+  const [nvidiaNimUrl, setNvidiaNimUrl] = useState("https://integrate.api.nvidia.com/v1");
+  const [vertexJson, setVertexJson] = useState("");
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
   const [saved, setSaved] = useState(false);
 
@@ -31,14 +28,22 @@ export default function APIVaultModal({ isOpen, onClose }: APIVaultModalProps) {
   const handleSaveKeys = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Send encrypted keys to local daemon to store in ~/.cosmos/vault.json
     try {
       const ws = new WebSocket("ws://127.0.0.1:8080");
       ws.onopen = () => {
         ws.send(
           JSON.stringify({
             type: "save_api_vault",
-            keys: { openaiKey, anthropicKey, geminiKey, ollamaUrl },
+            keys: {
+              openaiKey,
+              openaiBaseUrl,
+              anthropicKey,
+              geminiKey,
+              nvidiaNimKey,
+              nvidiaNimUrl,
+              vertexJson,
+              ollamaUrl,
+            },
           })
         );
         ws.close();
@@ -46,7 +51,7 @@ export default function APIVaultModal({ isOpen, onClose }: APIVaultModalProps) {
     } catch (e) {}
 
     setSaved(true);
-    addToast("API Keys & Provider endpoints saved securely in local vault!", "success");
+    addToast("BYOK Vault updated with OpenAI-Compatible, NVIDIA NIM & Vertex AI endpoints!", "success");
     setTimeout(() => {
       setSaved(false);
       onClose();
@@ -60,7 +65,7 @@ export default function APIVaultModal({ isOpen, onClose }: APIVaultModalProps) {
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          className="w-full max-w-lg bg-white border border-[rgba(0,0,0,0.12)] rounded-3xl p-7 shadow-2xl overflow-hidden relative select-none space-y-5"
+          className="w-full max-w-xl bg-white border border-[rgba(0,0,0,0.12)] rounded-3xl p-7 shadow-2xl overflow-hidden relative select-none space-y-5 max-h-[90vh] overflow-y-auto"
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-[rgba(0,0,0,0.08)]">
@@ -69,8 +74,8 @@ export default function APIVaultModal({ isOpen, onClose }: APIVaultModalProps) {
                 <Key size={18} />
               </div>
               <div>
-                <h2 className="text-base font-bold text-[#1E1F24]">Bring Your Own Keys (BYOK)</h2>
-                <p className="text-xs text-[#72737A]">Configure API Keys & LLM Models per Agent</p>
+                <h2 className="text-base font-bold text-[#1E1F24]">Enterprise BYOK API Vault</h2>
+                <p className="text-xs text-[#72737A]">Configure Custom Models, NVIDIA NIM, & Vertex AI</p>
               </div>
             </div>
             <button onClick={onClose} className="btn-icon p-1.5 rounded-xl hover:bg-black/5 text-[#878890]">
@@ -82,64 +87,106 @@ export default function APIVaultModal({ isOpen, onClose }: APIVaultModalProps) {
             <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] flex items-center gap-2.5">
               <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
               <span className="text-[#52535A] text-[11px] leading-relaxed">
-                Your keys are encrypted locally in <code className="font-mono text-[#1E1F24] font-bold">~/.cosmos/vault.json</code>. Keys are never sent to external servers.
+                Encrypted locally in <code className="font-mono text-[#1E1F24] font-bold">~/.cosmos/vault.json</code>. Zero third-party telemetry.
               </span>
             </div>
 
-            {/* Anthropic Claude Key */}
-            <div>
-              <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
-                ANTHROPIC CLAUDE API KEY (e.g. Dev-Bot)
-              </label>
-              <input
-                type="password"
-                value={anthropicKey}
-                onChange={(e) => setAnthropicKey(e.target.value)}
-                placeholder="sk-ant-api03-..."
-                className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] outline-none focus:border-[#1E1F24] font-mono text-xs"
-              />
+            {/* OpenAI & OpenAI-Compatible Custom Endpoints */}
+            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] space-y-2.5">
+              <div className="flex items-center gap-1.5 font-bold text-[#1E1F24] text-[11px]">
+                <Layers size={13} />
+                <span>OPENAI / OPENAI-COMPATIBLE CUSTOM ENDPOINT</span>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">API KEY</label>
+                <input
+                  type="password"
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  placeholder="sk-proj-... or custom provider key"
+                  className="w-full px-3 py-1.5 rounded-xl border border-[rgba(0,0,0,0.12)] bg-white outline-none font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">CUSTOM BASE URL (Optional e.g. Together / Groq / vLLM)</label>
+                <input
+                  type="text"
+                  value={openaiBaseUrl}
+                  onChange={(e) => setOpenaiBaseUrl(e.target.value)}
+                  placeholder="https://api.together.xyz/v1 or http://localhost:8000/v1"
+                  className="w-full px-3 py-1.5 rounded-xl border border-[rgba(0,0,0,0.12)] bg-white outline-none font-mono text-xs"
+                />
+              </div>
             </div>
 
-            {/* OpenAI Key */}
-            <div>
-              <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
-                OPENAI API KEY (e.g. Alex PM / GPT-4o)
-              </label>
-              <input
-                type="password"
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
-                placeholder="sk-proj-..."
-                className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] outline-none focus:border-[#1E1F24] font-mono text-xs"
-              />
+            {/* NVIDIA NIM */}
+            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] space-y-2.5">
+              <div className="flex items-center gap-1.5 font-bold text-[#1E1F24] text-[11px]">
+                <Cpu size={13} />
+                <span>NVIDIA NIM INFERENCE ENDPOINT</span>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">NVIDIA NIM API KEY</label>
+                <input
+                  type="password"
+                  value={nvidiaNimKey}
+                  onChange={(e) => setNvidiaNimKey(e.target.value)}
+                  placeholder="nvapi-..."
+                  className="w-full px-3 py-1.5 rounded-xl border border-[rgba(0,0,0,0.12)] bg-white outline-none font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">NIM BASE ENDPOINT</label>
+                <input
+                  type="text"
+                  value={nvidiaNimUrl}
+                  onChange={(e) => setNvidiaNimUrl(e.target.value)}
+                  placeholder="https://integrate.api.nvidia.com/v1"
+                  className="w-full px-3 py-1.5 rounded-xl border border-[rgba(0,0,0,0.12)] bg-white outline-none font-mono text-xs"
+                />
+              </div>
             </div>
 
-            {/* Google Gemini Key */}
-            <div>
-              <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
-                GOOGLE GEMINI API KEY (e.g. QA-Guard / Gemini 2.5)
-              </label>
-              <input
-                type="password"
-                value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] outline-none focus:border-[#1E1F24] font-mono text-xs"
-              />
+            {/* Google Cloud Vertex AI */}
+            <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] space-y-2.5">
+              <div className="flex items-center gap-1.5 font-bold text-[#1E1F24] text-[11px]">
+                <Cloud size={13} />
+                <span>GOOGLE CLOUD VERTEX AI CREDENTIALS</span>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">SERVICE ACCOUNT JSON / OAUTH TOKEN</label>
+                <textarea
+                  rows={2}
+                  value={vertexJson}
+                  onChange={(e) => setVertexJson(e.target.value)}
+                  placeholder='{"type": "service_account", "project_id": "my-gcp-project", ...}'
+                  className="w-full px-3 py-1.5 rounded-xl border border-[rgba(0,0,0,0.12)] bg-white outline-none font-mono text-xs"
+                />
+              </div>
             </div>
 
-            {/* Local Ollama Endpoint */}
-            <div>
-              <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1 flex items-center gap-1">
-                <Server size={12} /> LOCAL OLLAMA ENDPOINT (Offline LLM)
-              </label>
-              <input
-                type="text"
-                value={ollamaUrl}
-                onChange={(e) => setOllamaUrl(e.target.value)}
-                placeholder="http://localhost:11434"
-                className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] outline-none focus:border-[#1E1F24] font-mono text-xs"
-              />
+            {/* Standard Keys */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">ANTHROPIC API KEY</label>
+                <input
+                  type="password"
+                  value={anthropicKey}
+                  onChange={(e) => setAnthropicKey(e.target.value)}
+                  placeholder="sk-ant-..."
+                  className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] outline-none font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">GOOGLE GEMINI KEY</label>
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] outline-none font-mono text-xs"
+                />
+              </div>
             </div>
 
             <button

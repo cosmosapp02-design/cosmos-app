@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, X, Check, Code2, Calendar, FileText, Megaphone, Triangle, Server, FlaskConical, Eye, GitMerge, Bot, UserPlus, Key, Cpu, Sparkles,
+  Plus, X, Check, Code2, Calendar, FileText, Megaphone, Triangle, Server, FlaskConical, Eye, GitMerge, Bot, UserPlus, Key, Cpu, Sparkles, RefreshCw, ShieldAlert,
 } from "lucide-react";
 import AgentAvatar from "./agent-avatar";
 import { useToast } from "./toast";
@@ -18,18 +18,12 @@ export interface Agent {
   avatar: string;
   description: string;
   soul: string;
-  model: string;
+  primaryModel: string;
+  backupModel: string;
   skills: { name: string; icon: string; proficiency: number }[];
   currentTask?: string;
   stats: { tasksCompleted: number; tokensSaved: string; uptime: string };
 }
-
-const LLM_MODELS = [
-  { id: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet (Anthropic)", provider: "Anthropic" },
-  { id: "gpt-4o", label: "GPT-4o (OpenAI)", provider: "OpenAI" },
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (Google)", provider: "Google" },
-  { id: "ollama-llama3", label: "Ollama Llama3 (Local Offline)", provider: "Local" },
-];
 
 const initialAgents: Agent[] = [
   {
@@ -39,7 +33,8 @@ const initialAgents: Agent[] = [
     color: "#1E1F24",
     status: "online",
     avatar: "A",
-    model: "gpt-4o",
+    primaryModel: "gpt-4o-2024-11-20",
+    backupModel: "claude-3-5-sonnet",
     description: "Orchestrates sprint goals, writes PRDs, and prioritizes user features.",
     soul: "I am Alex, a strategic product manager who transforms vague ideas into actionable roadmaps. I think in user stories, prioritize ruthlessly, and always keep the north star metric in focus.",
     skills: [
@@ -57,7 +52,8 @@ const initialAgents: Agent[] = [
     color: "#1E1F24",
     status: "busy",
     avatar: "D",
-    model: "claude-3-5-sonnet",
+    primaryModel: "gemini-3.6-flash-lite",
+    backupModel: "claude-3-5-sonnet",
     description: "Writes full-stack code, executes refactors, and builds Next.js/TypeScript modules.",
     soul: "I am Dev-Bot, a senior software architect specializing in TypeScript, Next.js, and clean code. I write modular, well-tested code and strictly follow design systems.",
     skills: [
@@ -75,7 +71,8 @@ const initialAgents: Agent[] = [
     color: "#1E1F24",
     status: "online",
     avatar: "Q",
-    model: "gemini-2.5-flash",
+    primaryModel: "gemini-2.5-flash",
+    backupModel: "gpt-4o-mini",
     description: "Runs Playwright E2E test suites, audits visual regressions, and verifies acceptance criteria.",
     soul: "I am QA-Guard, a relentless quality assurance engineer. I write automated Playwright test suites, inspect edge cases, and catch regressions before code hits production.",
     skills: [
@@ -97,17 +94,15 @@ export default function AgentsView() {
   const [newRole, setNewRole] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newSoul, setNewSoul] = useState("");
-  const [newModel, setNewModel] = useState("claude-3-5-sonnet");
+  const [newPrimaryModel, setNewPrimaryModel] = useState("gemini-3.6-flash-lite");
+  const [newBackupModel, setNewBackupModel] = useState("claude-3-5-sonnet");
 
   const { addToast } = useToast();
 
-  const handleModelChange = (agentId: string, modelId: string) => {
+  const handleUpdateModels = (agentId: string, primary: string, backup: string) => {
     setAgents((prev) =>
-      prev.map((a) => (a.id === agentId ? { ...a, model: modelId } : a))
+      prev.map((a) => (a.id === agentId ? { ...a, primaryModel: primary, backupModel: backup } : a))
     );
-    const updatedAgent = agents.find((a) => a.id === agentId);
-    const modelLabel = LLM_MODELS.find((m) => m.id === modelId)?.label;
-    addToast(`${updatedAgent?.name} model updated to ${modelLabel}`, "success");
   };
 
   const handleCreateAgent = () => {
@@ -122,7 +117,8 @@ export default function AgentsView() {
       avatar: newName.charAt(0).toUpperCase(),
       description: newDesc || `${newRole} AI worker.`,
       soul: newSoul || `I am ${newName}, a ${newRole}.`,
-      model: newModel,
+      primaryModel: newPrimaryModel || "gemini-3.6-flash-lite",
+      backupModel: newBackupModel || "claude-3-5-sonnet",
       skills: [
         { name: "Task Execution", icon: "Code2", proficiency: 85 },
         { name: "PRD Analysis", icon: "FileText", proficiency: 80 },
@@ -146,14 +142,14 @@ export default function AgentsView() {
         <div>
           <h1 className="text-sm font-bold text-[#1E1F24]">AI Talent Directory</h1>
           <p className="text-[11px] text-[#878890]">
-            Manage your AI workforce, per-agent LLM model assignments, and learned SKILL.md profiles
+            Freeform model inputs, backup failover models, and BYOK Enterprise API Vault
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setVaultModalOpen(true)}
-            className="btn btn-secondary btn-sm rounded-xl"
+            className="btn btn-secondary btn-sm rounded-xl font-semibold"
           >
             <Key size={13} />
             <span>API Vault (BYOK)</span>
@@ -193,23 +189,35 @@ export default function AgentsView() {
                   {agent.description}
                 </p>
 
-                {/* Per-Agent LLM Model Selection Dropdown */}
-                <div className="p-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] mb-4">
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#72737A] uppercase mb-1">
-                    <Cpu size={12} />
-                    <span>LLM Model Engine</span>
+                {/* Freeform Primary & Backup Model Inputs */}
+                <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] space-y-2 mb-4">
+                  <div>
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-[#1E1F24] uppercase mb-0.5">
+                      <Cpu size={11} className="text-emerald-600" />
+                      <span>PRIMARY MODEL</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={agent.primaryModel}
+                      onChange={(e) => handleUpdateModels(agent.id, e.target.value, agent.backupModel)}
+                      placeholder="e.g. gemini-3.6-flash-lite"
+                      className="w-full px-2.5 py-1 rounded-lg bg-white border border-[rgba(0,0,0,0.12)] font-mono text-xs text-[#1E1F24] outline-none"
+                    />
                   </div>
-                  <select
-                    value={agent.model}
-                    onChange={(e) => handleModelChange(agent.id, e.target.value)}
-                    className="w-full bg-white border border-[rgba(0,0,0,0.1)] rounded-lg px-2 py-1 text-xs text-[#1E1F24] font-semibold outline-none cursor-pointer"
-                  >
-                    {LLM_MODELS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
+
+                  <div>
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-[#72737A] uppercase mb-0.5">
+                      <RefreshCw size={11} className="text-amber-600" />
+                      <span>BACKUP FAILOVER MODEL</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={agent.backupModel}
+                      onChange={(e) => handleUpdateModels(agent.id, agent.primaryModel, e.target.value)}
+                      placeholder="e.g. claude-3-5-sonnet"
+                      className="w-full px-2.5 py-1 rounded-lg bg-white border border-[rgba(0,0,0,0.12)] font-mono text-xs text-[#52535A] outline-none"
+                    />
+                  </div>
                 </div>
 
                 {/* Skills */}
@@ -290,18 +298,24 @@ export default function AgentsView() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">ASSIGNED MODEL</label>
-                  <select
-                    value={newModel}
-                    onChange={(e) => setNewModel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] text-xs outline-none focus:border-[#1E1F24] font-semibold"
-                  >
-                    {LLM_MODELS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">PRIMARY MODEL (ANY STRING)</label>
+                  <input
+                    type="text"
+                    value={newPrimaryModel}
+                    onChange={(e) => setNewPrimaryModel(e.target.value)}
+                    placeholder="e.g. gemini-3.6-flash-lite or deepseek-r1"
+                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] text-xs font-mono outline-none focus:border-[#1E1F24]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">BACKUP FAILOVER MODEL</label>
+                  <input
+                    type="text"
+                    value={newBackupModel}
+                    onChange={(e) => setNewBackupModel(e.target.value)}
+                    placeholder="e.g. claude-3-5-sonnet"
+                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] text-xs font-mono outline-none focus:border-[#1E1F24]"
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">SOUL.MD IDENTITY</label>

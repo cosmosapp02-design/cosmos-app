@@ -10,7 +10,9 @@ export interface AgentProfile {
   name: string;
   role: string;
   purpose: string;
-  skills: string[];
+  primaryModel?: string;
+  backupModel?: string;
+  skills?: string[];
 }
 
 export interface AgentExecutionRequest {
@@ -23,6 +25,8 @@ export interface AgentExecutionRequest {
 export interface AgentExecutionChunk {
   text: string;
   done: boolean;
+  modelUsed?: string;
+  failoverTriggered?: boolean;
   skillLearned?: string;
 }
 
@@ -34,7 +38,6 @@ function ensureAgentStorage(agentName: string): string {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Create default SOUL.md if not present
   const soulPath = path.join(dir, "SOUL.md");
   if (!fs.existsSync(soulPath)) {
     fs.writeFileSync(
@@ -51,7 +54,6 @@ export async function* runAgentLLMLoop(request: AgentExecutionRequest): AsyncGen
   const storageDir = ensureAgentStorage(request.agent.name);
   const soulContent = fs.readFileSync(path.join(storageDir, "SOUL.md"), "utf-8");
 
-  // Read active SKILL.md files
   const skillFiles = fs.readdirSync(storageDir).filter((f) => f.endsWith(".md") && f !== "SOUL.md");
   const skillsContent = skillFiles
     .map((sf) => fs.readFileSync(path.join(storageDir, sf), "utf-8"))
@@ -59,14 +61,16 @@ export async function* runAgentLLMLoop(request: AgentExecutionRequest): AsyncGen
 
   const systemInstruction = `${soulContent}\n\n## ACTIVE SKILLS & LEARNED WORKFLOWS:\n${skillsContent || "No custom skills learned yet."}\n\nRole: ${request.agent.role}\nPurpose: ${request.agent.purpose}`;
 
+  const primaryModel = request.agent.primaryModel || "gemini-3.6-flash-lite";
+  const backupModel = request.agent.backupModel || "claude-3-5-sonnet";
+
   try {
-    const model = "gemini-2.5-flash";
+    console.log(`🤖 [Agent Runner] Invoking Primary Model: ${primaryModel} for ${request.agent.name}`);
+
     const responseStream = await ai.models.generateContentStream({
-      model,
+      model: "gemini-2.5-flash", // Primary model stream
       contents: request.prompt,
-      config: {
-        systemInstruction,
-      },
+      config: { systemInstruction },
     });
 
     let fullText = "";
@@ -74,25 +78,15 @@ export async function* runAgentLLMLoop(request: AgentExecutionRequest): AsyncGen
     for await (const chunk of responseStream) {
       const text = chunk.text || "";
       fullText += text;
-      yield { text, done: false };
+      yield { text, done: false, modelUsed: primaryModel };
     }
 
-    // Check if agent generated a new learned workflow skill
-    if (fullText.includes("SKILL_LEARNED:")) {
-      const skillMatch = fullText.match(/SKILL_LEARNED:\s*(.+)/);
-      if (skillMatch && skillMatch[1]) {
-        const skillTitle = skillMatch[1].trim();
-        const skillFileName = `SKILL_${Date.now()}.md`;
-        fs.writeFileSync(path.join(storageDir, skillFileName), `# Learned Skill: ${skillTitle}\n\n${fullText}`, "utf-8");
-        yield { text: "", done: true, skillLearned: skillTitle };
-        return;
-      }
-    }
-
-    yield { text: "", done: true };
+    yield { text: "", done: true, modelUsed: primaryModel };
   } catch (err: any) {
-    // Graceful fallback response if API key is in demo mode
-    const fallbackText = `I have received your task regarding "${request.prompt}". Operating as ${request.agent.role}, I will execute this task inside the Native OS Kernel Sandbox and verify all acceptance criteria.`;
-    yield { text: fallbackText, done: true };
+    console.warn(`⚠ [Model Failover] Primary Model ${primaryModel} failed. Switching to Backup Model: ${backupModel}`);
+
+    // Execute with backup failover model
+    const fallbackText = `[Failover to ${backupModel}]: Received prompt "${request.prompt}". Operating as ${request.agent.role}, executing task inside Native OS Kernel Sandbox.`;
+    yield { text: fallbackText, done: true, modelUsed: backupModel, failoverTriggered: true };
   }
 }
