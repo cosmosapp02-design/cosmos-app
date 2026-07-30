@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
-import { Bot, Sparkles, Building2, UserPlus, ArrowRight, CheckCircle2, Lock, Mail, Key } from "lucide-react";
+import { Bot, Sparkles, Building2, UserPlus, ArrowRight, CheckCircle2, Lock, Mail, Key, X } from "lucide-react";
 import { useToast } from "./toast";
 
 interface AuthOnboardingModalProps {
@@ -108,15 +108,25 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
           className="w-full max-w-md bg-white border border-[rgba(0,0,0,0.12)] rounded-3xl p-7 shadow-2xl overflow-hidden relative select-none"
         >
-          {/* Top Brand Header */}
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-2xl bg-[#1E1F24] text-white flex items-center justify-center font-bold text-base shadow-sm">
-              C
+          {/* Top Brand Header with Top-Right Close Button */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-[#1E1F24] text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                C
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-[#1E1F24]">Cosmos AI Platform</h2>
+                <p className="text-[11px] text-[#72737A]">Build & Manage Your AI Organization</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-bold text-[#1E1F24]">Cosmos AI Platform</h2>
-              <p className="text-xs text-[#72737A]">Build & Manage Your AI Organization</p>
-            </div>
+
+            <button
+              onClick={onClose}
+              className="btn-icon p-1.5 rounded-xl hover:bg-black/5 text-[#878890] hover:text-[#1E1F24] transition-colors"
+              title="Close modal"
+            >
+              <X size={16} />
+            </button>
           </div>
 
           {/* STEP 1: AUTH & ORG NAME */}
