@@ -34,7 +34,7 @@ Every feature should reinforce this experience.
 ---
 
 ## 1. PRODUCT OVERVIEW
-A hybrid cloud/local multi-agent workspace combining a **Vercel-hosted Web SaaS UI** with a **secure local engine daemon** running on the user's computer. Users build, manage, and monitor real-world AI agent organizations operating inside a Single Shared Docker Sandbox per project folder.
+A hybrid cloud/local multi-agent workspace combining a **Vercel-hosted Web SaaS UI** with a **zero-friction local engine daemon** running natively on the user's computer. Users build, manage, and monitor real-world AI agent organizations operating inside a **Native OS Kernel-Sandboxed Workspace** per project folder.
 
 ---
 
@@ -55,7 +55,7 @@ A hybrid cloud/local multi-agent workspace combining a **Vercel-hosted Web SaaS 
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                 USER'S LOCAL COMPUTER                       │
-│    (Daemon + Shared Docker Sandbox + AST Codebase Files)    │
+│ (Daemon + Zero-Friction Native OS Sandbox + AST Indexer)    │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
@@ -65,7 +65,7 @@ A hybrid cloud/local multi-agent workspace combining a **Vercel-hosted Web SaaS 
    - Local daemon runs on the user's computer (`packages/daemon`).
    - Outbound WebSocket tunnel connects the daemon to the Vercel cloud relay server behind NAT/firewalls.
    - **Online / Offline Telemetry**:
-     - `Engine Online`: Local PC is running; real-time Docker sandbox code execution and terminal streams active.
+     - `Engine Online`: Local PC is running; real-time native sandbox code execution and terminal streams active.
      - `Agents Offline`: Local PC is offline/sleeping; cloud DB still provides full access to read chat history, project files, and ticket boards.
 4. **Mobile Phone Optimization (< 768px Viewports)**:
    - On mobile devices, complex desktop interfaces (Kanban boards, Gantt timelines, React Flow Org canvases) automatically collapse into a focused **Mobile Workspace Chat Hub**.
@@ -86,13 +86,26 @@ Collapsible primary left sidebar with 5 primary views + bottom status:
 
 ---
 
-## 4. TECHNICAL ENGINES & GOVERNANCE
-1. **Single Shared Project Sandbox**: Docker container API (`dockerode`). Mounts target project directory strictly into `/workspace` with microsecond mutex locks.
-2. **AST Knowledge Engine (Token Optimization)**: Tree-sitter parser (`graph.json`) injecting exact code syntax nodes instead of raw file dumps, saving up to 70% tokens.
-3. **Governance Systems**:
-   - **Report Mode**: Intercepts high-risk operations (terminal scripts, file writes, external API calls) and pauses execution for human approval in UI (mobile push or desktop modal).
-   - **Goal Mode**: Autonomous closed-loop execution inside sandbox boundaries.
-4. **Model Context Protocol (MCP)**: `@modelcontextprotocol/sdk` connecting Google Workspace, Figma, and Playwright headless browser for self-healing visual test loops.
+## 4. ZERO-FRICTION NATIVE OS SANDBOX & GOVERNANCE
+
+### 1. Zero-Friction Native Kernel Sandbox (No Docker Required)
+- **Eliminates Docker Friction**: Users do **NOT** need to install or run Docker Desktop.
+- **Native Kernel Policies**:
+  - **macOS**: `sandbox-exec` / Apple Seatbelt framework.
+  - **Windows**: Windows AppContainer & Job Objects.
+  - **Linux**: `bwrap` (Bubblewrap) / `seccomp`.
+- **Strict Directory Scoping**: Kernel security policies strictly constrain agent file access to the designated `/my-project` directory, completely blocking access to `~/.ssh`, `~/.aws`, system root drives, or unauthorized network ports.
+- **Microsecond File Lock Queue**: Daemon manages in-memory file mutex queues (`async-mutex`) to prevent concurrent agent race conditions.
+
+### 2. AST Knowledge Engine (Token Optimization)
+- Tree-sitter parser (`graph.json`) injecting exact code syntax nodes instead of raw file dumps, saving up to 70% tokens.
+
+### 3. Governance Systems
+- **Report Mode**: Intercepts high-risk operations (terminal scripts, file writes, external API calls) and pauses execution for human approval in UI (mobile push or desktop modal).
+- **Goal Mode**: Autonomous closed-loop execution inside sandbox boundaries.
+
+### 4. Model Context Protocol (MCP)
+- `@modelcontextprotocol/sdk` connecting Google Workspace, Figma, and Playwright headless browser for self-healing visual test loops.
 
 ---
 
@@ -102,38 +115,20 @@ Collapsible primary left sidebar with 5 primary views + bottom status:
   /web           # Next.js 14 Web UI (Vercel Deployed)
 /packages
   /daemon        # Local Engine Daemon & WSS Relay Client
-  /sandbox       # Docker Container Controller & File Lock Manager
+  /sandbox       # Native OS Kernel Sandbox (sandbox-exec / AppContainer)
   /ast-indexer   # Tree-sitter Parser & AST Graph Generator
   /mcp-client    # MCP Tool Router & Credential Store
 ```
 
 ---
 
-## 6. FEASIBILITY, TIMELINE & IMPLEMENTATION HURDLES
+## 6. FEASIBILITY & TIMELINE
 
-### Feasibility: High (9/10)
-- The architecture uses proven, battle-tested production technologies: Next.js 14 on Vercel, Supabase Cloud Auth/DB, WebSockets (`ws`), Dockerode for containers, and Anthropic's open MCP standard.
+### Feasibility: High (9.5/10)
+- Zero external software dependencies for end users. Runs natively on macOS, Windows, and Linux out of the box.
 
 ### Estimated Project Timeline (6 to 8 Weeks)
-- **Weeks 1–2 (Cloud DB & Local Daemon)**: Setup Supabase Auth/DB, build the Node.js local daemon CLI installer, and establish the secure WebSocket tunnel between Vercel and local daemon.
-- **Weeks 3–4 (Docker Sandbox & Governance)**: Implement `dockerode` container wrapper, `/workspace` volume mounting, and Report Mode approval modals.
+- **Weeks 1–2 (Cloud DB & Daemon Core)**: Setup Supabase Auth/DB, build local Node.js daemon, and establish outbound WSS relay tunnel from Vercel to local daemon.
+- **Weeks 3–4 (Native OS Sandbox & Governance)**: Implement `sandbox-exec` (Mac) / `AppContainer` (Windows) kernel wrappers, directory boundary enforcement, and Report Mode approval popups.
 - **Weeks 5–6 (Agent LLM & MCP Integration)**: Connect Vercel AI SDK / LangChain agent execution loops, `SOUL.md`/`SKILL.md` persistence, and MCP tools (Playwright).
-- **Weeks 7–8 (Mobile Responsive Polish & Hardening)**: Finalize mobile chat hub UI, offline status fallbacks, and end-to-end testing.
-
-### Expected Tough Setup Areas (Key Challenges & Solutions)
-
-1. **WSS Tunneling Behind Local Firewalls (NAT Traversal)**:
-   - *Challenge*: Establishing a stable WebSocket connection from Vercel to a local daemon on home/office Wi-Fi without requiring manual router port forwarding.
-   - *Solution*: Use outbound WebSocket relay servers (e.g. Cloudflare Tunnels, Pusher, or a lightweight WebSocket Relay server on Railway/Fly.io) where the daemon initiates the connection outward.
-
-2. **Cross-Platform Local Daemon Installer**:
-   - *Challenge*: Non-technical users need a 1-click install for the background daemon on macOS, Windows, and Linux.
-   - *Solution*: Package the daemon using **Tauri 2.0** or a single-file executable via `pkg`/`bun build --compile` that runs quietly in the system tray.
-
-3. **Docker Dependency on Host Machine**:
-   - *Challenge*: The local daemon requires Docker Desktop to execute sandbox containers. If Docker is not running, container launches fail.
-   - *Solution*: Provide an automatic fall-back to a localized Node.js process isolation sandbox (`child_process` with strict directory boundaries) if Docker Desktop is not detected.
-
-4. **Multi-Agent File Lock Race Conditions**:
-   - *Challenge*: Dev-Bot and QA-Guard writing to the same file simultaneously can corrupt code files.
-   - *Solution*: Enforce strict in-memory mutex queues (`async-mutex`) in the local daemon so file writes are processed sequentially.
+- **Weeks 7–8 (Mobile Responsive Polish & Hardening)**: Finalize mobile chat hub UI, push notification triggers, offline status fallbacks, and launch testing.
