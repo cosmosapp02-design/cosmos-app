@@ -62,9 +62,16 @@ if (!config.paired) {
   });
 }
 
+import { buildASTGraph } from "./ast-indexer";
+
 const wss = new WebSocketServer({ port: PORT });
 
 console.log(`🚀 Cosmos Local Engine Daemon v1.0.0 listening on ws://127.0.0.1:${PORT}`);
+
+// Build initial AST Tree-sitter Code Base Graph
+buildASTGraph(path.resolve("../")).then((graph) => {
+  console.log(`⚡ [AST Indexer] Indexed ${graph.totalFilesIndexed} files (${graph.nodes.length} AST symbol nodes generated)`);
+});
 
 wss.on("connection", (ws: WebSocket) => {
   console.log("⚡ [Daemon] Client connected");

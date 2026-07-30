@@ -258,7 +258,7 @@ Deploy senior AI coders, product managers, and QA inspectors in seconds. Save 70
         ],
       },
     ],
-  },
+},
 ];
 
 export default function ProjectsMemoryView() {
@@ -268,6 +268,7 @@ export default function ProjectsMemoryView() {
   const [selectedFile, setSelectedFile] = useState<MemoryFile | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"files" | "ast">("files");
   const [newProjectModalOpen, setNewProjectModalOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDesc, setNewProjectDesc] = useState("");
@@ -411,37 +412,98 @@ export default function ProjectsMemoryView() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] text-xs text-[#878890]">
-              <Search size={13} />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search files..."
-                className="bg-transparent outline-none w-36 text-xs text-[#1E1F24] placeholder-[#878890]"
-              />
+            {/* Tab Switcher */}
+            <div className="flex bg-[#FAF8F5] p-1 rounded-xl border border-[rgba(0,0,0,0.08)] text-xs">
+              <button
+                onClick={() => setActiveTab("files")}
+                className={`px-3 py-1 rounded-lg font-semibold transition-all ${
+                  activeTab === "files" ? "bg-[#1E1F24] text-white shadow-2xs" : "text-[#72737A]"
+                }`}
+              >
+                Files Explorer
+              </button>
+              <button
+                onClick={() => setActiveTab("ast")}
+                className={`px-3 py-1 rounded-lg font-semibold transition-all ${
+                  activeTab === "ast" ? "bg-[#1E1F24] text-white shadow-2xs" : "text-[#72737A]"
+                }`}
+              >
+                AST Symbol Graph
+              </button>
             </div>
 
-            <div className="flex items-center gap-1 bg-[#FAF8F5] p-1 rounded-xl border border-[rgba(0,0,0,0.08)]">
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`p-1 rounded-lg text-xs ${viewMode === "grid" ? "bg-white text-[#1E1F24] shadow-2xs" : "text-[#878890]"}`}
-              >
-                <Grid size={14} />
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                className={`p-1 rounded-lg text-xs ${viewMode === "list" ? "bg-white text-[#1E1F24] shadow-2xs" : "text-[#878890]"}`}
-              >
-                <ListIcon size={14} />
-              </button>
-            </div>
+            {activeTab === "files" && (
+              <>
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] text-xs text-[#878890]">
+                  <Search size={13} />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search files..."
+                    className="bg-transparent outline-none w-36 text-xs text-[#1E1F24] placeholder-[#878890]"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 bg-[#FAF8F5] p-1 rounded-xl border border-[rgba(0,0,0,0.08)]">
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    className={`p-1 rounded-lg text-xs ${viewMode === "grid" ? "bg-white text-[#1E1F24] shadow-2xs" : "text-[#878890]"}`}
+                  >
+                    <Grid size={14} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className={`p-1 rounded-lg text-xs ${viewMode === "list" ? "bg-white text-[#1E1F24] shadow-2xs" : "text-[#878890]"}`}
+                  >
+                    <ListIcon size={14} />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Files Grid / List Container */}
+        {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto p-6">
-          {!selectedSubfolder || selectedSubfolder.files.length === 0 ? (
+          {activeTab === "ast" ? (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-[#1E1F24]">AST Codebase Symbol Graph (Tree-sitter)</h3>
+                  <p className="text-[11px] text-[#72737A] mt-0.5">
+                    Token-efficient code context index automatically parsed into <code className="font-mono text-[#1E1F24]">graph.json</code>
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-xl bg-[#1E1F24] text-white text-[10px] font-mono font-bold">
+                  24 AST Nodes Indexed
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 font-mono text-xs">
+                {[
+                  { name: "middleware(req)", type: "function", path: "auth/middleware.ts", line: 4 },
+                  { name: "verifyToken(jwt)", type: "function", path: "lib/auth.ts", line: 12 },
+                  { name: "AuthProvider", type: "component", path: "lib/auth-context.tsx", line: 18 },
+                  { name: "AuthOnboardingModal", type: "component", path: "components/auth-onboarding-modal.tsx", line: 16 },
+                  { name: "runInNativeSandbox", type: "function", path: "daemon/sandbox.ts", line: 28 },
+                  { name: "runAgentLLMLoop", type: "function", path: "daemon/llm-runner.ts", line: 42 },
+                ].map((node) => (
+                  <div key={node.name} className="p-3 rounded-xl bg-white border border-[rgba(0,0,0,0.1)] shadow-2xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[#1E1F24]">{node.name}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-[#FAF8F5] text-[9px] font-bold text-[#72737A] uppercase">
+                        {node.type}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-[#878890] truncate">
+                      {node.path}:L{node.line}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : !selectedSubfolder || selectedSubfolder.files.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center text-[#878890] space-y-2">
               <Folder size={40} className="text-[#878890]/40" />
               <div className="text-sm font-semibold text-[#1E1F24]">Empty Folder</div>

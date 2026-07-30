@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "../lib/auth-context";
 import { supabase } from "../lib/supabase";
 import { Bot, CheckCircle2, ShieldCheck, Laptop, ArrowRight } from "lucide-react";
 import AuthOnboardingModal from "../components/auth-onboarding-modal";
 
-export default function PairPage() {
+function PairPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const code = searchParams.get("code");
@@ -31,7 +31,6 @@ export default function PairPage() {
     setPairingStatus("authenticating");
 
     try {
-      // Connect to local daemon over WebSocket to send session tokens
       const ws = new WebSocket("ws://127.0.0.1:8080");
 
       ws.onopen = () => {
@@ -122,5 +121,13 @@ export default function PairPage() {
         onAgentCreated={() => {}}
       />
     </div>
+  );
+}
+
+export default function PairPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center text-xs text-[#72737A]">Loading pairing session...</div>}>
+      <PairPageContent />
+    </Suspense>
   );
 }
