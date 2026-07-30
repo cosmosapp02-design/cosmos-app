@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
-import { Bot, Sparkles, Building2, UserPlus, ArrowRight, CheckCircle2, Lock, Mail, Key, X } from "lucide-react";
+import { Bot, Sparkles, Building2, UserPlus, ArrowRight, CheckCircle2, Lock, Mail, Key, X, Eye, EyeOff } from "lucide-react";
 import { useToast } from "./toast";
 
 interface AuthOnboardingModalProps {
@@ -18,6 +18,9 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
   const [step, setStep] = useState<1 | 2 | 3>(1); // 1: Auth/Org, 2: First Agent, 3: Success
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [orgNameInput, setOrgNameInput] = useState("");
   const [agentName, setAgentName] = useState("");
   const [agentRole, setAgentRole] = useState("");
@@ -31,6 +34,12 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (mode === "signup" && password !== confirmPassword) {
+      addToast("Passwords do not match. Please re-enter your password.", "danger");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -136,7 +145,7 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
                 <button
                   onClick={() => setMode("signup")}
                   className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    mode === "signup" ? "bg-white text-[#1E1F24] shadow-2xs" : "text-[#72737A]"
+                    mode === "signup" ? "bg-[#1E1F24] text-white shadow-2xs" : "text-[#72737A]"
                   }`}
                 >
                   Create AI Company
@@ -144,14 +153,14 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
                 <button
                   onClick={() => setMode("signin")}
                   className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    mode === "signin" ? "bg-white text-[#1E1F24] shadow-2xs" : "text-[#72737A]"
+                    mode === "signin" ? "bg-[#1E1F24] text-white shadow-2xs" : "text-[#72737A]"
                   }`}
                 >
                   Sign In
                 </button>
               </div>
 
-              <form onSubmit={handleAuthSubmit} className="space-y-4">
+              <form onSubmit={handleAuthSubmit} className="space-y-3.5">
                 {mode === "signup" && (
                   <div>
                     <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
@@ -188,24 +197,58 @@ export default function AuthOnboardingModal({ isOpen, onClose, onAgentCreated }:
 
                 <div>
                   <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">PASSWORD</label>
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5]">
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] relative">
                     <Key size={15} className="text-[#878890]" />
                     <input
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••••••"
                       required
                       minLength={6}
-                      className="bg-transparent outline-none w-full text-xs text-[#1E1F24] placeholder-[#878890]"
+                      className="bg-transparent outline-none w-full text-xs text-[#1E1F24] placeholder-[#878890] pr-7"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 text-[#878890] hover:text-[#1E1F24] transition-colors"
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
                   </div>
                 </div>
+
+                {mode === "signup" && (
+                  <div>
+                    <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">RE-ENTER PASSWORD</label>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] relative">
+                      <Key size={15} className="text-[#878890]" />
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="••••••••••••"
+                        required
+                        minLength={6}
+                        className="bg-transparent outline-none w-full text-xs text-[#1E1F24] placeholder-[#878890] pr-7"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 text-[#878890] hover:text-[#1E1F24] transition-colors"
+                        title={showConfirmPassword ? "Hide password" : "Show password"}
+                      >
+                        {showConfirmPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-2.5 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-[#32333A] transition-all shadow-sm"
+                  className="w-full py-2.5 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-[#32333A] transition-all shadow-sm mt-2"
                 >
                   {loading ? (
                     "Processing..."
