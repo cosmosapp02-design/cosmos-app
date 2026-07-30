@@ -348,8 +348,23 @@ export default function ProjectsMemoryView() {
     fetchUserProjects();
   }, [fetchUserProjects]);
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId) || projects[0];
-  const selectedSubfolder = selectedProject?.subfolders.find((sf) => sf.id === selectedSubfolderId) || selectedProject?.subfolders[0];
+  const fallbackProject: ProjectMemory = {
+    id: "proj-fallback",
+    name: "Company Memory Core",
+    description: "Internal Repositories & Assets",
+    creator: "You",
+    status: "Active",
+    subfolders: [
+      {
+        id: "sf-fallback",
+        name: "Codebase & Specs",
+        files: [],
+      },
+    ],
+  };
+
+  const selectedProject = (projects && projects.length > 0 ? (projects.find((p) => p.id === selectedProjectId) || projects[0]) : null) || fallbackProject;
+  const selectedSubfolder = (selectedProject?.subfolders && selectedProject.subfolders.length ? (selectedProject.subfolders.find((sf) => sf.id === selectedSubfolderId) || selectedProject.subfolders[0]) : null) || fallbackProject.subfolders[0];
 
   const handleCreateProject = () => {
     if (!newProjectName.trim()) return;

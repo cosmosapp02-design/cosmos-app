@@ -91,34 +91,22 @@ export default function AgentsView() {
     fetchUserAgents();
   }, [fetchUserAgents]);
 
-  const handleUpdateModels = async (agentId: string, primary: string, backup: string) => {
+  const handleUpdateModels = (agentId: string, primary: string, backup: string) => {
     setAgents((prev) =>
       prev.map((a) => (a.id === agentId ? { ...a, primaryModel: primary, backupModel: backup } : a))
     );
-
-    if (user) {
-      try {
-        await supabase
-          .from("agents")
-          .update({ primary_model: primary, backup_model: backup })
-          .eq("id", agentId)
-          .eq("user_id", user.id);
-      } catch (e) {}
-    }
   };
 
   const handleCreateAgent = async () => {
     if (!newName.trim() || !newRole.trim()) return;
 
     try {
-      const newAgentObj = {
+      const newAgentObj: any = {
         name: newName,
         role: newRole,
         purpose: newDesc || newSoul || `${newRole} AI worker.`,
         skills: ["TypeScript", "API Integration", "PRDs"],
         avatar_color: "#1E1F24",
-        primary_model: newPrimaryModel || "gemini-3.6-flash-lite",
-        backup_model: newBackupModel || "claude-3-5-sonnet",
         user_id: user?.id,
       };
 
