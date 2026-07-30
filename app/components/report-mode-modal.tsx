@@ -9,34 +9,64 @@ import {
 interface ReportModeModalProps {
   onApprove: () => void;
   onDeny: () => void;
+  command?: string;
+  agentName?: string;
+  file?: string;
+  requestId?: string;
 }
 
-const commandDetails = [
-  { label: "Command",    value: "npm publish",                   Icon: Code2 },
-  { label: "Agent",      value: "Dev-Bot (Senior Coder)",        Icon: Bot },
-  { label: "Risk Level", value: "HIGH — External network write", Icon: AlertTriangle, danger: true },
-  { label: "Context",    value: "Sprint 4 auth flow deployment", Icon: FolderKanban },
-];
-
-export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalProps) {
+export default function ReportModeModal({
+  onApprove,
+  onDeny,
+  command = "npm publish",
+  agentName = "Dev-Bot (Senior Coder)",
+  file = "auth/middleware.ts",
+  requestId,
+}: ReportModeModalProps) {
   const [decision, setDecision] = useState<"approved" | "denied" | null>(null);
 
   const handleApprove = () => {
     setDecision("approved");
+
+    // Send WebSocket approval message to daemon if requestId is present
+    try {
+      const ws = new WebSocket("ws://127.0.0.1:8080");
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "report_mode_response", requestId, approved: true }));
+        ws.close();
+      };
+    } catch (e) {}
+
     setTimeout(onApprove, 1000);
   };
 
   const handleDeny = () => {
     setDecision("denied");
+
+    try {
+      const ws = new WebSocket("ws://127.0.0.1:8080");
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "report_mode_response", requestId, approved: false }));
+        ws.close();
+      };
+    } catch (e) {}
+
     setTimeout(onDeny, 700);
   };
+
+  const commandDetails = [
+    { label: "Intercepted Command", value: command, Icon: Code2 },
+    { label: "AI Agent", value: agentName, Icon: Bot },
+    { label: "Risk Level", value: "HIGH — Native OS File System & Terminal Write", Icon: AlertTriangle, danger: true },
+    { label: "Target Scope", value: file, Icon: FolderKanban },
+  ];
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(12px)" }}
     >
       <motion.div
@@ -74,7 +104,7 @@ export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalPr
               Report Mode — Approval Required
             </div>
             <div className="t-small mt-0.5" style={{ color: "var(--text-muted)" }}>
-              Agent intercepted a high-risk operation. Your decision required.
+              Native OS Sandbox intercepted a high-risk operation. Decision required.
             </div>
           </div>
           <button className="btn-icon" onClick={handleDeny}>
@@ -91,12 +121,10 @@ export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalPr
           >
             <div className="flex items-center gap-2 mb-2.5">
               <Terminal size={12} style={{ color: "var(--danger)" }} />
-              <span className="t-label" style={{ color: "var(--danger)" }}>INTERCEPTED COMMAND</span>
+              <span className="t-label" style={{ color: "var(--danger)" }}>INTERCEPTED SHELL COMMAND</span>
             </div>
-            <div className="t-small" style={{ color: "#F87171" }}>
-              ${" "}
-              <span style={{ color: "#FBBF24" }}>npm</span>{" "}
-              <span style={{ color: "#6EE7B7" }}>publish</span>
+            <div className="t-small text-emerald-400 font-bold">
+              $ {command}
             </div>
           </div>
 
@@ -136,8 +164,7 @@ export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalPr
           >
             <AlertTriangle size={14} strokeWidth={1.75} style={{ color: "var(--warning)", marginTop: 1, flexShrink: 0 }} />
             <p className="t-small leading-relaxed" style={{ color: "var(--warning)" }}>
-              This will publish a package to the npm public registry — an irreversible external write operation.
-              Approve only if you intend to release.
+              Execution will run inside the Native OS Kernel Sandbox (`sandbox-exec`). Approve only if you authorize this command.
             </p>
           </div>
 
@@ -154,7 +181,7 @@ export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalPr
                 <button
                   id="report-deny-btn"
                   onClick={handleDeny}
-                  className="btn btn-danger py-3 rounded-xl justify-center"
+                  className="btn btn-danger py-3 rounded-xl justify-center font-semibold"
                 >
                   <XCircle size={15} strokeWidth={1.75} />
                   Deny — Block
@@ -162,10 +189,10 @@ export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalPr
                 <button
                   id="report-approve-btn"
                   onClick={handleApprove}
-                  className="btn btn-success py-3 rounded-xl justify-center"
+                  className="btn btn-success py-3 rounded-xl justify-center font-semibold"
                 >
                   <CheckCircle2 size={15} strokeWidth={1.75} />
-                  Approve — Run
+                  Approve & Run
                 </button>
               </motion.div>
             ) : (
@@ -195,7 +222,7 @@ export default function ReportModeModal({ onApprove, onDeny }: ReportModeModalPr
                   className="t-body font-semibold"
                   style={{ color: decision === "approved" ? "var(--success)" : "var(--danger)" }}
                 >
-                  {decision === "approved" ? "Approved! Executing command..." : "Denied. Command blocked."}
+                  {decision === "approved" ? "Approved! Executing in Native Sandbox..." : "Denied. Command blocked."}
                 </span>
               </motion.div>
             )}

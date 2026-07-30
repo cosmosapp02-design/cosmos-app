@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Sidebar from "./components/sidebar";
 import DashboardView from "./components/dashboard-view";
 import AgentsView from "./components/agents-view";
@@ -21,14 +21,55 @@ function MainApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [pendingApprovalCallback, setPendingApprovalCallback] = useState<
-    (() => void) | null
-  >(null);
+  const [reportData, setReportData] = useState<{ command?: string; agentName?: string; file?: string; requestId?: string }>({});
+  const [pendingApprovalCallback, setPendingApprovalCallback] = useState<(() => void) | null>(null);
 
   const { user, signOut, orgName } = useAuth();
 
+  // Listen for daemon Report Mode approval prompts over WebSockets
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let timer: any = null;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket("ws://127.0.0.1:8080");
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "report_mode_prompt") {
+              setReportData({
+                command: data.command,
+                agentName: data.agentName,
+                file: data.file,
+                requestId: data.requestId,
+              });
+              setReportModalOpen(true);
+            }
+          } catch (e) {}
+        };
+        ws.onclose = () => {
+          timer = setTimeout(connect, 4000);
+        };
+      } catch (e) {
+        timer = setTimeout(connect, 4000);
+      }
+    };
+
+    connect();
+    return () => {
+      if (ws) ws.close();
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
   const triggerReportMode = (onApprove: () => void) => {
     setPendingApprovalCallback(() => onApprove);
+    setReportData({
+      command: "npm publish",
+      agentName: "Dev-Bot (Senior Coder)",
+      file: "auth/middleware.ts",
+    });
     setReportModalOpen(true);
   };
 
@@ -98,6 +139,10 @@ function MainApp() {
       <AnimatePresence>
         {reportModalOpen && (
           <ReportModeModal
+            command={reportData.command}
+            agentName={reportData.agentName}
+            file={reportData.file}
+            requestId={reportData.requestId}
             onApprove={() => {
               pendingApprovalCallback?.();
               setReportModalOpen(false);
