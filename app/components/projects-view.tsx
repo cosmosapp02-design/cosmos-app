@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import AgentAvatar from "./agent-avatar";
 import { useToast } from "./toast";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../lib/auth-context";
 
 export type TicketStatus = "backlog" | "in-progress" | "qa-review" | "done";
 export type PMViewMode = "board" | "table" | "workload" | "gantt" | "calendar";
@@ -214,12 +216,14 @@ const TERMINAL_LOGS = [
   { delay: 4880, text: "🚀 Sprint 4 complete. 2 issues resolved. Velocity: +12%", color: "#1E1F24" },
 ];
 
-interface ProjectsViewProps {
-  triggerReportMode: (onApprove: () => void) => void;
+export interface ProjectsViewProps {
+  triggerReportMode: (onApproved: () => void) => void;
 }
 
 export default function ProjectsView({ triggerReportMode }: ProjectsViewProps) {
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
+  const { user } = useAuth();
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<PMViewMode>("board");
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [search, setSearch] = useState("");
@@ -239,6 +243,52 @@ export default function ProjectsView({ triggerReportMode }: ProjectsViewProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const { addToast } = useToast();
+
+  const fetchUserTickets = useCallback(async () => {
+    if (!user) {
+      setTickets([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("tickets")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (!error && data && data.length > 0) {
+        const mapped: Ticket[] = data.map((t: any) => ({
+          id: t.id,
+          key: t.key || `COS-${Math.floor(100 + Math.random() * 900)}`,
+          title: t.title,
+          assignee: t.assignee || "Dev-Bot",
+          assigneeColor: "#1E1F24",
+          priority: t.priority || "medium",
+          tags: Array.isArray(t.tags) ? t.tags : ["Engineering"],
+          status: t.status || "backlog",
+          points: t.points || 3,
+          startDate: t.start_date || "Today",
+          dueDate: t.due_date || "Sprint End",
+          epicId: t.epic_id || "epic-1",
+          description: t.description || "",
+          subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
+          comments: Array.isArray(t.comments) ? t.comments : [],
+        }));
+        setTickets(mapped);
+      } else {
+        setTickets([]);
+      }
+    } catch (e) {
+      setTickets([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchUserTickets();
+  }, [fetchUserTickets]);
 
   const runSprint = () => {
     if (sprintRunning) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Folder,
@@ -261,10 +261,15 @@ Deploy senior AI coders, product managers, and QA inspectors in seconds. Save 70
 },
 ];
 
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../lib/auth-context";
+
 export default function ProjectsMemoryView() {
-  const [projects, setProjects] = useState<ProjectMemory[]>(INITIAL_PROJECTS);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("proj-1");
-  const [selectedSubfolderId, setSelectedSubfolderId] = useState<string | null>("sf-1");
+  const { user } = useAuth();
+  const [projects, setProjects] = useState<ProjectMemory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [selectedSubfolderId, setSelectedSubfolderId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<MemoryFile | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
@@ -273,6 +278,75 @@ export default function ProjectsMemoryView() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDesc, setNewProjectDesc] = useState("");
   const { addToast } = useToast();
+
+  const fetchUserProjects = useCallback(async () => {
+    if (!user) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("project_files")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (!error && data && data.length > 0) {
+        const defaultProj: ProjectMemory = {
+          id: "proj-user",
+          name: "Company Memory Core",
+          description: "Internal Repositories & Assets",
+          creator: user.email?.split("@")[0] || "You",
+          status: "Active",
+          subfolders: [
+            {
+              id: "sf-user-1",
+              name: "Codebase & Specs",
+              files: data.map((f: any) => ({
+                id: f.id,
+                name: f.name || "file.ts",
+                type: f.type || "code",
+                size: f.size || "2.4 KB",
+                creator: f.creator || "You",
+                updatedAt: "Just now",
+                content: f.content || "",
+              })),
+            },
+          ],
+        };
+        setProjects([defaultProj]);
+        setSelectedProjectId("proj-user");
+        setSelectedSubfolderId("sf-user-1");
+      } else {
+        const cleanProj: ProjectMemory = {
+          id: "proj-clean",
+          name: "Company Memory Repository",
+          description: "Upload & Store Project Memory",
+          creator: "You",
+          status: "Active",
+          subfolders: [
+            {
+              id: "sf-clean-1",
+              name: "Repository Assets",
+              files: [],
+            },
+          ],
+        };
+        setProjects([cleanProj]);
+        setSelectedProjectId("proj-clean");
+        setSelectedSubfolderId("sf-clean-1");
+      }
+    } catch (e) {
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchUserProjects();
+  }, [fetchUserProjects]);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) || projects[0];
   const selectedSubfolder = selectedProject?.subfolders.find((sf) => sf.id === selectedSubfolderId) || selectedProject?.subfolders[0];
