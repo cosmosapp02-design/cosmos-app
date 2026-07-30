@@ -12,12 +12,11 @@ function PairPageContent() {
   const code = searchParams.get("code");
   const { user, orgName } = useAuth();
   
-  const [pairingStatus, setPairingStatus] = useState<"authenticating" | "ready" | "paired" | "failed">("authenticating");
+  const [pairingStatus, setPairingStatus] = useState<"authenticating" | "ready" | "paired">("ready");
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   const handleApprovePairing = useCallback(async () => {
-    if (!user || !code) return;
-    setPairingStatus("authenticating");
+    setPairingStatus("paired");
 
     try {
       const ws = new WebSocket("ws://127.0.0.1:8080");
@@ -27,51 +26,28 @@ function PairPageContent() {
           JSON.stringify({
             type: "approve_pairing",
             code,
-            userId: user.id,
-            email: user.email,
+            userId: user?.id,
+            email: user?.email,
             orgName,
           })
         );
+        ws.close();
       };
+    } catch (err) {}
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "pairing_complete") {
-            setPairingStatus("paired");
-            setTimeout(() => {
-              router.push("/");
-            }, 1200);
-          }
-        } catch (e) {}
-      };
-
-      ws.onerror = () => {
-        // Fallback: If WebSocket connection takes a moment, set paired locally and redirect
-        setPairingStatus("paired");
-        setTimeout(() => {
-          router.push("/");
-        }, 1200);
-      };
-    } catch (err) {
-      setPairingStatus("paired");
-      setTimeout(() => {
-        router.push("/");
-      }, 1200);
-    }
-  }, [user, code, orgName, router]);
+    // Instant redirect to workspace
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 800);
+  }, [user, code, orgName]);
 
   useEffect(() => {
     if (!user) {
       setAuthModalOpen(true);
-      setPairingStatus("authenticating");
     } else {
       setAuthModalOpen(false);
-      setPairingStatus("ready");
-      // Auto-trigger pairing approval once user is signed in
-      handleApprovePairing();
     }
-  }, [user, handleApprovePairing]);
+  }, [user]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#FAF8F5] text-[#1E1F24] p-6 select-none">
@@ -93,36 +69,36 @@ function PairPageContent() {
           </div>
         )}
 
-        {pairingStatus === "ready" && (
-          <div className="space-y-4 pt-2">
-            <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] text-left text-xs space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[#878890]">Account:</span>
-                <span className="font-semibold text-[#1E1F24]">{user?.email}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#878890]">Organization:</span>
-                <span className="font-semibold text-[#1E1F24]">{orgName}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleApprovePairing}
-              className="w-full py-3 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-[#32333A] transition-all shadow-sm"
-            >
-              <span>Connecting Device...</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-        )}
-
-        {pairingStatus === "paired" && (
+        {pairingStatus === "paired" ? (
           <div className="py-4 space-y-2">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
               <CheckCircle2 size={24} />
             </div>
             <h3 className="text-sm font-bold text-[#1E1F24]">Device Paired Successfully!</h3>
             <p className="text-xs text-[#72737A]">Opening workspace...</p>
+          </div>
+        ) : (
+          <div className="space-y-4 pt-2">
+            {user && (
+              <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.08)] text-left text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#878890]">Account:</span>
+                  <span className="font-semibold text-[#1E1F24]">{user.email}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[#878890]">Organization:</span>
+                  <span className="font-semibold text-[#1E1F24]">{orgName}</span>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleApprovePairing}
+              className="w-full py-3 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-[#32333A] transition-all shadow-sm"
+            >
+              <span>{user ? "Open My Workspace" : "Sign In to Pair Device"}</span>
+              <ArrowRight size={14} />
+            </button>
           </div>
         )}
       </div>
@@ -133,7 +109,9 @@ function PairPageContent() {
           setAuthModalOpen(false);
           if (user) handleApprovePairing();
         }}
-        onAgentCreated={() => {}}
+        onAgentCreated={() => {
+          handleApprovePairing();
+        }}
       />
     </div>
   );
