@@ -1,6 +1,8 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createClient } from "@supabase/supabase-js";
 import { runInNativeSandbox } from "./sandbox";
+import { runAgentLLMLoop } from "./llm-runner";
+import { executeMCPTool } from "./mcp";
 import { exec } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -45,7 +47,6 @@ function saveConfig(config: DaemonConfig) {
 
 let config = loadConfig();
 
-// METHOD 1 DEVICE PAIRING: If unpaired, generate code and open browser
 if (!config.paired) {
   const pairingCode = `cosmos_pair_${Math.random().toString(36).substring(2, 8)}`;
   config.pairingCode = pairingCode;
@@ -55,7 +56,7 @@ if (!config.paired) {
 
   const isMac = process.platform === "darwin";
   const openCmd = isMac ? `open "${pairingUrl}"` : `start "${pairingUrl}"`;
-  
+
   exec(openCmd, (err) => {
     if (err) console.error("Could not auto-open browser:", err.message);
   });
@@ -82,7 +83,7 @@ wss.on("connection", (ws: WebSocket) => {
     try {
       const message = JSON.parse(data.toString());
 
-      // DEVICE PAIRING HANDSHAKE
+      // DEVICE PAIRING
       if (message.type === "approve_pairing") {
         if (message.code === config.pairingCode || !config.pairingCode) {
           config = {
@@ -96,6 +97,37 @@ wss.on("connection", (ws: WebSocket) => {
           console.log(`✓ Device Paired Successfully with User: ${message.email}`);
           ws.send(JSON.stringify({ type: "pairing_complete", success: true }));
         }
+      }
+
+      // PHASE 3: REAL-TIME LLM AGENT CHAT EXECUTION
+      if (message.type === "send_chat_message") {
+        const agent = message.agent || { name: "Dev-Bot", role: "Senior Full-Stack Coder", purpose: "Build features" };
+        const prompt = message.prompt || "Hello";
+
+        ws.send(JSON.stringify({ type: "agent_typing", agentName: agent.name }));
+
+        for await (const chunk of runAgentLLMLoop({ agent, prompt })) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "chat_stream_chunk",
+                agentName: agent.name,
+                text: chunk.text,
+                done: chunk.done,
+                skillLearned: chunk.skillLearned,
+              })
+            );
+          }
+        }
+      }
+
+      // PHASE 3: EXECUTE MCP TOOLS
+      if (message.type === "execute_mcp_tool") {
+        const result = await executeMCPTool({
+          toolName: message.toolName || "playwright_audit",
+          params: message.params || {},
+        });
+        ws.send(JSON.stringify({ type: "mcp_tool_result", result }));
       }
 
       if (message.type === "ping") {

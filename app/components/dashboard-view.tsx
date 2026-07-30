@@ -168,6 +168,8 @@ export default function DashboardView() {
   const [isTyping, setIsTyping] = useState(false);
   const [search, setSearch] = useState("");
   const [starred, setStarred] = useState(false);
+  const [interAgentTurns, setInterAgentTurns] = useState<number>(5); // Demo 5 turns reached
+  const [discussionPaused, setDiscussionPaused] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
 
@@ -177,6 +179,12 @@ export default function DashboardView() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [channelMessages, isTyping]);
+
+  const handleResumeDiscussion = () => {
+    setDiscussionPaused(false);
+    setInterAgentTurns(0);
+    addToast("Human Supervisor approved thread. Inter-agent collaboration resumed!", "success");
+  };
 
   const sendMessage = () => {
     if (!input.trim()) return;
@@ -486,6 +494,31 @@ export default function DashboardView() {
             <div className="flex gap-3 items-center text-xs text-[#72737A] p-2">
               <AgentAvatar name={channel.agents[0]} size={28} />
               <span>{channel.agents[0]} is generating response...</span>
+            </div>
+          )}
+
+          {/* 5-Message Inter-Agent Infinite Loop Circuit Breaker Banner */}
+          {discussionPaused && activeChannelId === "1" && (
+            <div className="my-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center font-bold text-xs shrink-0">
+                  5x
+                </div>
+                <div>
+                  <div className="font-bold text-amber-950">
+                    Inter-Agent Discussion Paused (5 Turns Reached)
+                  </div>
+                  <div className="text-[11px] text-amber-800 mt-0.5">
+                    Dev-Bot and QA-Guard have exchanged 5 messages in #{channel.name}. Human supervisor approval required.
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={handleResumeDiscussion}
+                className="px-3 py-1.5 rounded-xl bg-amber-900 text-white text-xs font-semibold hover:bg-amber-950 transition-all shrink-0 ml-3"
+              >
+                Approve & Resume
+              </button>
             </div>
           )}
           <div ref={messagesEndRef} />
