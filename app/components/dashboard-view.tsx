@@ -56,7 +56,12 @@ export interface AgentWorker {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function toProfileSlug(name: string): string {
-  return name.toLowerCase().replace(/-agent$/, "").trim().replace(/[^a-z0-9_-]/g, "");
+  return name
+    .toLowerCase()
+    .replace(/-agent$/, "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_-]/g, "");
 }
 
 function isProfileOnline(profile: string, workers: Record<string, AgentWorker>): boolean {
@@ -149,9 +154,10 @@ export default function DashboardView() {
   const [threadInput, setThreadInput] = useState("");   // reply in thread
   const [isTyping, setIsTyping] = useState(false);
 
-  // Presence
+  // Presence & Agents metadata
   const [workers, setWorkers] = useState<Record<string, AgentWorker>>({});
   const [presenceReady, setPresenceReady] = useState(false);
+  const [agentsMap, setAgentsMap] = useState<Record<string, { name: string; role: string; purpose: string }>>({});
 
   // Multi-agent approval
   const [requiresApproval, setRequiresApproval] = useState(false);
@@ -208,6 +214,13 @@ export default function DashboardView() {
             activeProfileSlugs = sJson.agents.map((a: any) =>
               a.name.toLowerCase().replace(/[^a-z0-9]/g, "")
             );
+            const aMap: Record<string, any> = {};
+            sJson.agents.forEach((ag: any) => {
+              const slug = toProfileSlug(ag.name);
+              aMap[slug] = ag;
+              aMap[ag.name.toLowerCase()] = ag;
+            });
+            setAgentsMap(aMap);
           }
           if (sJson.channels) syncedChannelsList = sJson.channels;
         }
@@ -663,8 +676,19 @@ export default function DashboardView() {
     }));
 
     // 6. Call Hermes agent (fresh session = new thread context)
-    const agentName = isSystemChannel ? "Dev-Bot" : toProfileSlug(channelObj.name).split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-    const agentRole = isSystemChannel ? "Senior AI Engineer" : `${agentName} Agent`;
+    const profileSlug = toProfileSlug(channelObj.name);
+    const agentInfo = agentsMap[profileSlug] || agentsMap[channelObj.name.toLowerCase()];
+    const agentName = isSystemChannel
+      ? "Dev-Bot"
+      : (agentInfo?.name || profileSlug.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "));
+    const agentRole = isSystemChannel
+      ? "Senior AI Engineer"
+      : (agentInfo?.role || `${agentName} Agent`);
+
+    const systemPromptContent = isSystemChannel
+      ? "You are Dev-Bot, a Senior AI Engineer on the Cosmos platform."
+      : (agentInfo?.purpose || `You are ${agentName}, ${agentRole} in this organization.`);
+
     const streamMsgId = `streaming-${Date.now()}`;
 
     setIsTyping(true);
@@ -683,10 +707,13 @@ export default function DashboardView() {
     }));
 
     await callAgent({
-      profileSlug: isSystemChannel ? "" : toProfileSlug(channelObj.name),
+      profileSlug: isSystemChannel ? "" : profileSlug,
       isGeneral: isSystemChannel,
       sessionId,
-      contextMessages: [{ role: "user", content: `/new\n${userText}` }],
+      contextMessages: [
+        { role: "system", content: systemPromptContent },
+        { role: "user", content: `/new\n${userText}` },
+      ],
       onStreamMsg: (text) => {
         setThreadMessages((prev) => ({
           ...prev,
@@ -779,18 +806,34 @@ export default function DashboardView() {
     } catch {}
 
     // Build context from this thread's messages only
+    const profileSlug = toProfileSlug(channelObj.name);
+    const agentInfo = agentsMap[profileSlug] || agentsMap[channelObj.name.toLowerCase()];
+    const agentName = isSystemChannel
+      ? "Dev-Bot"
+      : (agentInfo?.name || profileSlug.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "));
+    const agentRole = isSystemChannel
+      ? "Senior AI Engineer"
+      : (agentInfo?.role || `${agentName} Agent`);
+
+    const systemPromptContent = isSystemChannel
+      ? "You are Dev-Bot, a Senior AI Engineer on the Cosmos platform."
+      : (agentInfo?.purpose || `You are ${agentName}, ${agentRole} in this organization.`);
+
     const currentMsgs = threadMessages[threadId] || [];
-    const contextMessages = currentMsgs
+    const historyMsgs = currentMsgs
       .filter((m) => !m.isStreaming)
       .slice(-10)
       .map((m) => ({
         role: m.isAgent ? "assistant" : "user",
         content: m.text,
       }));
-    contextMessages.push({ role: "user", content: userText });
 
-    const agentName = isSystemChannel ? "Dev-Bot" : toProfileSlug(channelObj.name).split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-    const agentRole = isSystemChannel ? "Senior AI Engineer" : `${agentName} Agent`;
+    const contextMessages = [
+      { role: "system", content: systemPromptContent },
+      ...historyMsgs,
+      { role: "user", content: userText },
+    ];
+
     const streamMsgId = `streaming-reply-${Date.now()}`;
 
     setIsTyping(true);
@@ -809,7 +852,7 @@ export default function DashboardView() {
     }));
 
     await callAgent({
-      profileSlug: isSystemChannel ? "" : toProfileSlug(channelObj.name),
+      profileSlug: isSystemChannel ? "" : profileSlug,
       isGeneral: isSystemChannel,
       sessionId,
       contextMessages,
