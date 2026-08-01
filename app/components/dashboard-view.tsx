@@ -587,21 +587,26 @@ export default function DashboardView() {
 
     // 1. Create thread
     let newThread: Thread | null = null;
+    let threadErr: string | null = null;
     try {
       const res = await fetch("/api/v1/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ channel_id: activeChannelId, title: userText }),
       });
-      if (res.ok) {
-        const { thread } = await res.json();
-        newThread = thread;
+      const data = await res.json();
+      if (res.ok && data.thread) {
+        newThread = data.thread;
+      } else {
+        threadErr = data.error || "Failed to create thread";
       }
-    } catch {}
+    } catch (err: any) {
+      threadErr = err?.message || "Network error creating thread";
+    }
 
-    // If thread creation failed (e.g., table not yet created), notify and bail
+    // If thread creation failed, notify with exact error message and bail
     if (!newThread) {
-      addToast("Run the Feature 2 migration in Supabase first — see supabase/feature2_threads_migration.sql", "danger");
+      addToast(threadErr || "Run supabase/fix_channels_and_threads.sql in Supabase SQL editor", "danger");
       return;
     }
 

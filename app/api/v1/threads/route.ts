@@ -30,6 +30,28 @@ function toUuid(input: string): string {
 }
 
 /**
+ * Ensures the channel row exists in Supabase `channels` table
+ * to satisfy foreign key constraints.
+ */
+async function ensureChannelRow(rawChannelId: string, channelIdUuid: string) {
+  const client = sb();
+  const normName = rawChannelId.replace(/^ch-/, "").trim().toLowerCase() || "general";
+  try {
+    await client.from("channels").upsert(
+      [
+        {
+          id: channelIdUuid,
+          name: normName,
+          type: "group",
+          description: `Auto-created channel #${normName}`,
+        },
+      ],
+      { onConflict: "id" }
+    );
+  } catch {}
+}
+
+/**
  * GET /api/v1/threads?channel_id=...
  * Returns all threads for a channel, newest activity first.
  */
@@ -75,6 +97,9 @@ export async function POST(req: NextRequest) {
   const channelId = toUuid(rawChannelId);
   const safeTitle = title.slice(0, 200);
 
+  // Attempt to ensure channel row exists in DB
+  await ensureChannelRow(rawChannelId, channelId);
+
   const { data, error } = await sb()
     .from("threads")
     .insert([{ channel_id: channelId, title: safeTitle }])
@@ -82,7 +107,10 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message, channel_id: channelId },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ thread: data });
@@ -101,7 +129,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "thread_id is required" }, { status: 400 });
   }
 
-  // Fetch current reply_count then increment
   const { data: current } = await sb()
     .from("threads")
     .select("reply_count")
