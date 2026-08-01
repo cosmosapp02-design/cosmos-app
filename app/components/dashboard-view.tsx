@@ -686,7 +686,7 @@ export default function DashboardView() {
       profileSlug: isSystemChannel ? "" : toProfileSlug(channelObj.name),
       isGeneral: isSystemChannel,
       sessionId,
-      contextMessages: [{ role: "user", content: userText }],
+      contextMessages: [{ role: "user", content: `/new\n${userText}` }],
       onStreamMsg: (text) => {
         setThreadMessages((prev) => ({
           ...prev,
