@@ -3,8 +3,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Send, Hash, Search, Plus, Sparkles, MessageSquare, AlertTriangle,
-  ShieldAlert, ChevronRight, X, Circle, Wifi, WifiOff
+  Send, Hash, Plus, Sparkles, MessageSquare, AlertTriangle,
+  ShieldAlert, X, WifiOff, Wifi, ChevronRight, Maximize2, Minimize2,
+  MessageCircle, ArrowLeft, CornerDownRight
 } from "lucide-react";
 import AgentAvatar from "./agent-avatar";
 import FormattedMessage from "./formatted-message";
@@ -12,34 +13,27 @@ import { useToast } from "./toast";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-export interface ArtifactCard {
-  type: "code" | "prd" | "qa" | "db";
-  title: string;
-  subtitle: string;
-  status?: string;
-  content: string;
-  actionText?: string;
-}
-
-export interface Reaction {
-  emoji: string;
-  count: number;
-}
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Message {
   id: string;
   sender: string;
   role: string;
-  avatarColor: string;
   text: string;
   time: string;
-  reactions?: Reaction[];
-  artifact?: ArtifactCard;
   isStreaming?: boolean;
   isSystem?: boolean;
   isAgent?: boolean;
+  thread_id?: string;
+}
+
+export interface Thread {
+  id: string;
+  channel_id: string;
+  title: string;
+  reply_count: number;
+  last_activity_at: string;
+  created_at: string;
 }
 
 export interface ChannelItem {
@@ -59,21 +53,28 @@ export interface AgentWorker {
   seconds_ago: number;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Map a channel name or agent name to its hermes profile slug */
 function toProfileSlug(name: string): string {
   return name.toLowerCase().replace(/-agent$/, "").trim().replace(/[^a-z0-9_-]/g, "");
 }
 
-/** Whether a profile is currently online based on workers map */
 function isProfileOnline(profile: string, workers: Record<string, AgentWorker>): boolean {
   const w = workers[profile];
-  if (!w) return false;
-  return w.status === "online";
+  return !!w && w.status === "online";
 }
 
-/** Agent online/offline dot component */
+function timeAgo(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ago`;
+  if (h > 0) return `${h}h ago`;
+  if (m > 0) return `${m}m ago`;
+  return "just now";
+}
+
 function PresenceDot({ online, size = 8 }: { online: boolean; size?: number }) {
   return (
     <span
@@ -86,7 +87,7 @@ function PresenceDot({ online, size = 8 }: { online: boolean; size?: number }) {
   );
 }
 
-// ─── Stream helper (pure function, reused everywhere) ─────────────────────────
+// ─── SSE stream consumer ──────────────────────────────────────────────────────
 
 async function consumeSSEStream(
   res: Response,
@@ -115,8 +116,7 @@ async function consumeSSEStream(
           const parsed = JSON.parse(trimmed.substring(6));
           const delta =
             parsed.choices?.[0]?.delta?.content ||
-            parsed.choices?.[0]?.text ||
-            "";
+            parsed.choices?.[0]?.text || "";
           if (delta) {
             accumulated += delta;
             onDelta(accumulated);
@@ -128,41 +128,42 @@ async function consumeSSEStream(
   onComplete(accumulated);
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function DashboardView() {
   const { user, orgName } = useAuth();
 
+  // Channel state
   const [channels, setChannels] = useState<ChannelItem[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string>("");
-  const [messages, setMessages] = useState<Record<string, Message[]>>({});
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Presence state
+  // Thread state
+  const [threads, setThreads] = useState<Record<string, Thread[]>>({}); // keyed by channel_id
+  const [activeThread, setActiveThread] = useState<Thread | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Record<string, Message[]>>({}); // keyed by thread_id
+  const [threadPanelExpanded, setThreadPanelExpanded] = useState(false);
+
+  // Input state
+  const [channelInput, setChannelInput] = useState(""); // new thread from channel
+  const [threadInput, setThreadInput] = useState("");   // reply in thread
+  const [isTyping, setIsTyping] = useState(false);
+
+  // Presence
   const [workers, setWorkers] = useState<Record<string, AgentWorker>>({});
   const [presenceReady, setPresenceReady] = useState(false);
 
-  // Create Channel Modal
+  // Multi-agent approval
+  const [requiresApproval, setRequiresApproval] = useState(false);
+  const [agentTurnCount, setAgentTurnCount] = useState(0);
+
+  // Channel create modal
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelTopic, setNewChannelTopic] = useState("");
 
-  // Multi-agent approval gate
-  const [agentTurnCount, setAgentTurnCount] = useState<number>(0);
-  const [requiresApproval, setRequiresApproval] = useState<boolean>(false);
-  const [isAutoLoopActive, setIsAutoLoopActive] = useState<boolean>(false);
-
-  // Per-channel session mapping
-  const [sessionsMap, setSessionsMap] = useState<Record<string, string>>({});
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const threadEndRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
-
-  // Refs for stable access in intervals
-  const workersRef = useRef(workers);
-  workersRef.current = workers;
 
   const channelObj =
     channels.find((c) => c.id === activeChannelId) ||
@@ -175,23 +176,23 @@ export default function DashboardView() {
       unread: 0,
     };
 
-  // ── Session fetch ─────────────────────────────────────────────────────────
+  const activeChannelThreads = threads[activeChannelId] || [];
+  const activeThreadMessages = activeThread ? threadMessages[activeThread.id] || [] : [];
+
+  const isSystemChannel =
+    channelObj.name === "general" || channelObj.name === "sprint-planning";
+  const currentProfileSlug = toProfileSlug(channelObj.name);
+  const channelAgentOnline = isSystemChannel
+    ? true
+    : isProfileOnline(currentProfileSlug, workers);
+
+  // ── Scroll to bottom of thread ─────────────────────────────────────────────
 
   useEffect(() => {
-    if (!channelObj?.name) return;
-    async function fetchSession() {
-      try {
-        const res = await fetch(`/api/v1/sessions?channel=${channelObj.name}`);
-        if (res.ok) {
-          const data = await res.json();
-          setSessionsMap((prev) => ({ ...prev, [channelObj.name]: data.sessionId }));
-        }
-      } catch {}
-    }
-    fetchSession();
-  }, [channelObj?.name]);
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeThreadMessages, activeThread]);
 
-  // ── Channels fetch ────────────────────────────────────────────────────────
+  // ── Fetch channels ─────────────────────────────────────────────────────────
 
   const fetchWorkspaceChannels = useCallback(async () => {
     setLoading(true);
@@ -228,7 +229,6 @@ export default function DashboardView() {
         agents: ["Dev-Bot"],
         unread: 0,
       });
-
       channelMap.set("sprint-planning", {
         id: "ch-sprint-planning",
         name: "sprint-planning",
@@ -242,8 +242,7 @@ export default function DashboardView() {
         const normName = (c.name || "").toLowerCase().replace(/-agent$/, "").trim();
         const isGeneral = normName === "general" || normName === "sprint-planning";
         const profileSlugNorm = normName.replace(/[^a-z0-9]/g, "");
-        const isActiveAgent =
-          isGeneral || activeProfileSlugs.includes(profileSlugNorm);
+        const isActiveAgent = isGeneral || activeProfileSlugs.includes(profileSlugNorm);
         const isDeactivated =
           c.is_deactivated ||
           (!isGeneral && activeProfileSlugs.length > 0 && !isActiveAgent);
@@ -297,60 +296,69 @@ export default function DashboardView() {
     }
   }, []);
 
-  // ── Message fetch (Supabase, by channel_id) ───────────────────────────────
+  // ── Fetch threads for active channel ──────────────────────────────────────
 
-  const fetchChannelMessages = useCallback(async () => {
-    if (!activeChannelId) return;
-
+  const fetchThreads = useCallback(async (channelId: string) => {
+    if (!channelId) return;
     try {
-      const { data: dbMsgs, error } = await supabase
-        .from("messages")
-        .select("id, channel_id, sender_name, sender_role, text, is_agent, created_at")
-        .eq("channel_id", activeChannelId)
-        .order("created_at", { ascending: true })
-        .limit(100);
+      const res = await fetch(`/api/v1/threads?channel_id=${channelId}`);
+      if (res.ok) {
+        const { threads: list } = await res.json();
+        setThreads((prev) => ({ ...prev, [channelId]: list || [] }));
+      }
+    } catch {}
+  }, []);
 
-      if (!error && dbMsgs && dbMsgs.length > 0) {
-        const mapped: Message[] = dbMsgs.map((m: any) => ({
+  // ── Fetch messages for a thread ───────────────────────────────────────────
+
+  const fetchThreadMessages = useCallback(async (threadId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, thread_id, sender_name, sender_role, text, is_agent, created_at")
+        .eq("thread_id", threadId)
+        .order("created_at", { ascending: true })
+        .limit(200);
+
+      if (!error && data) {
+        const mapped: Message[] = data.map((m: any) => ({
           id: m.id,
           sender: m.sender_name || "Unknown",
           role: m.sender_role || (m.is_agent ? "Agent" : "CEO"),
-          avatarColor: m.is_agent ? "#1E1F24" : "#1E1F24",
           text: m.text || "",
           time: new Date(m.created_at || Date.now()).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
           }),
           isAgent: !!m.is_agent,
+          thread_id: m.thread_id,
         }));
 
-        setMessages((prev) => {
-          // Merge DB messages with any locally-streamed ones not yet in DB
-          const existing = prev[activeChannelId] || [];
+        setThreadMessages((prev) => {
+          const existing = prev[threadId] || [];
           const dbIds = new Set(mapped.map((m) => m.id));
-          const localOnly = existing.filter(
-            (m) => m.isStreaming || !dbIds.has(m.id)
-          );
-          return { ...prev, [activeChannelId]: [...mapped, ...localOnly] };
+          const localOnly = existing.filter((m) => m.isStreaming || !dbIds.has(m.id));
+          return { ...prev, [threadId]: [...mapped, ...localOnly] };
         });
       }
     } catch {}
-  }, [activeChannelId]);
+  }, []);
 
-  // ── Supabase Realtime subscription for live messages ──────────────────────
+  // ── Supabase Realtime — thread messages ───────────────────────────────────
 
   useEffect(() => {
-    if (!activeChannelId) return;
+    if (!activeThread) return;
+    const threadId = activeThread.id;
 
     const channel = supabase
-      .channel(`messages:${activeChannelId}`)
+      .channel(`thread-messages:${threadId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `channel_id=eq.${activeChannelId}`,
+          filter: `thread_id=eq.${threadId}`,
         },
         (payload: any) => {
           const m = payload.new;
@@ -358,31 +366,52 @@ export default function DashboardView() {
             id: m.id,
             sender: m.sender_name || "Unknown",
             role: m.sender_role || (m.is_agent ? "Agent" : "CEO"),
-            avatarColor: "#1E1F24",
             text: m.text || "",
             time: new Date(m.created_at || Date.now()).toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
             }),
             isAgent: !!m.is_agent,
+            thread_id: m.thread_id,
           };
 
-          setMessages((prev) => {
-            const current = prev[activeChannelId] || [];
-            // Don't add duplicate if we already have this ID
+          setThreadMessages((prev) => {
+            const current = prev[threadId] || [];
             if (current.some((msg) => msg.id === m.id)) return prev;
-            return { ...prev, [activeChannelId]: [...current, newMsg] };
+            return { ...prev, [threadId]: [...current, newMsg] };
           });
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [activeChannelId]);
+    return () => { supabase.removeChannel(channel); };
+  }, [activeThread?.id]);
 
-  // ── Presence: fetch on load + poll every 20s ──────────────────────────────
+  // ── Supabase Realtime — threads list ─────────────────────────────────────
+
+  useEffect(() => {
+    if (!activeChannelId) return;
+
+    const channel = supabase
+      .channel(`threads-list:${activeChannelId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "threads",
+          filter: `channel_id=eq.${activeChannelId}`,
+        },
+        () => {
+          fetchThreads(activeChannelId);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeChannelId, fetchThreads]);
+
+  // ── Presence ──────────────────────────────────────────────────────────────
 
   const fetchPresence = useCallback(async () => {
     try {
@@ -399,118 +428,78 @@ export default function DashboardView() {
     } catch {}
   }, []);
 
-  // ── Presence: heartbeat every 15s ─────────────────────────────────────────
-
-  const sendHeartbeat = useCallback(
-    async (status: "online" | "offline") => {
-      // Send heartbeat for every active Hermes profile currently in channels
-      const profiles = new Set<string>();
-      channels.forEach((ch) => {
-        if (!ch.isDeactivated) {
-          const slug = toProfileSlug(ch.name);
-          if (slug !== "general" && slug !== "sprint-planning" && slug !== "sprint_planning") {
-            profiles.add(slug);
-          }
+  const sendHeartbeat = useCallback(async (status: "online" | "offline") => {
+    const profiles = new Set<string>();
+    channels.forEach((ch) => {
+      if (!ch.isDeactivated) {
+        const slug = toProfileSlug(ch.name);
+        if (slug !== "general" && slug !== "sprint-planning" && slug !== "sprint_planning") {
+          profiles.add(slug);
         }
-      });
+      }
+    });
+    await Promise.allSettled(
+      Array.from(profiles).map((profile) =>
+        fetch("/api/v1/presence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profile, status }),
+        })
+      )
+    );
+  }, [channels]);
 
-      await Promise.allSettled(
-        Array.from(profiles).map((profile) =>
-          fetch("/api/v1/presence", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profile, status }),
-          })
-        )
-      );
-    },
-    [channels]
-  );
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  useEffect(() => { fetchWorkspaceChannels(); }, [fetchWorkspaceChannels]);
+  useEffect(() => { fetchPresence(); const t = setInterval(fetchPresence, 20_000); return () => clearInterval(t); }, [fetchPresence]);
 
   useEffect(() => {
-    fetchPresence();
-    const presenceInterval = setInterval(fetchPresence, 20_000);
-    return () => clearInterval(presenceInterval);
-  }, [fetchPresence]);
+    if (!activeChannelId) return;
+    fetchThreads(activeChannelId);
+    setActiveThread(null); // close thread panel on channel switch
+  }, [activeChannelId, fetchThreads]);
 
+  useEffect(() => {
+    if (activeThread) fetchThreadMessages(activeThread.id);
+  }, [activeThread?.id]);
+
+  // Heartbeat
   useEffect(() => {
     if (channels.length === 0) return;
-
-    // Heartbeat every 15s
     sendHeartbeat("online");
-    const heartbeatInterval = setInterval(() => sendHeartbeat("online"), 15_000);
-
-    // Go offline on tab hide / unload
-    const handleVisibilityChange = () => {
-      if (document.hidden) sendHeartbeat("offline");
-      else sendHeartbeat("online");
-    };
-    const handleUnload = () => sendHeartbeat("offline");
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("beforeunload", handleUnload);
-
-    return () => {
-      clearInterval(heartbeatInterval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("beforeunload", handleUnload);
-    };
+    const t = setInterval(() => sendHeartbeat("online"), 15_000);
+    const onVis = () => { if (document.hidden) sendHeartbeat("offline"); else sendHeartbeat("online"); };
+    const onUnload = () => sendHeartbeat("offline");
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("beforeunload", onUnload);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("beforeunload", onUnload); };
   }, [channels, sendHeartbeat]);
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-
+  // Refetch on tab focus
   useEffect(() => {
-    fetchWorkspaceChannels();
-  }, [fetchWorkspaceChannels]);
+    const onVis = () => {
+      if (!document.hidden) {
+        if (activeChannelId) fetchThreads(activeChannelId);
+        if (activeThread) fetchThreadMessages(activeThread.id);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [activeChannelId, activeThread?.id, fetchThreads, fetchThreadMessages]);
 
-  useEffect(() => {
-    fetchChannelMessages();
-  }, [fetchChannelMessages]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeChannelId]);
-
-  // ── Channel create ─────────────────────────────────────────────────────────
+  // ── Create channel ────────────────────────────────────────────────────────
 
   const handleCreateChannel = async () => {
     if (!newChannelName.trim()) return;
     const formattedName = newChannelName.toLowerCase().replace(/\s+/g, "-");
-    const newChanObj = {
-      name: formattedName,
-      type: "group",
-      description: newChannelTopic || "Channel topic",
-      user_id: user?.id,
-    };
-
     try {
       const { data, error } = await supabase
-        .from("channels")
-        .insert([newChanObj])
-        .select();
-      if (!error && data && data.length > 0) {
-        const createdItem: ChannelItem = {
-          id: data[0].id,
-          name: data[0].name,
-          type: "group",
-          topic: data[0].description,
-          agents: ["Dev-Bot"],
-          unread: 0,
-        };
-        setChannels((prev) => [...prev, createdItem]);
-        setActiveChannelId(createdItem.id);
-        addToast(`Channel #${formattedName} created!`, "success");
-      } else {
-        const localItem: ChannelItem = {
-          id: `c-${Date.now()}`,
-          name: formattedName,
-          type: "group",
-          topic: newChannelTopic || "Channel topic",
-          agents: ["Dev-Bot"],
-          unread: 0,
-        };
-        setChannels((prev) => [...prev, localItem]);
-        setActiveChannelId(localItem.id);
+        .from("channels").insert([{ name: formattedName, type: "group", description: newChannelTopic || "Channel topic", user_id: user?.id }]).select();
+      if (!error && data?.[0]) {
+        const item: ChannelItem = { id: data[0].id, name: data[0].name, type: "group", topic: data[0].description, agents: ["Dev-Bot"], unread: 0 };
+        setChannels((prev) => [...prev, item]);
+        setActiveChannelId(item.id);
         addToast(`Channel #${formattedName} created!`, "success");
       }
     } catch {} finally {
@@ -520,36 +509,131 @@ export default function DashboardView() {
     }
   };
 
-  // ── Send message ──────────────────────────────────────────────────────────
+  // ── Agent call helper ─────────────────────────────────────────────────────
 
-  const handleSend = async (e: React.FormEvent) => {
+  const callAgent = async ({
+    profileSlug,
+    isGeneral,
+    sessionId,
+    contextMessages,
+    onStreamMsg,
+    streamMsgId,
+    setMsgs,
+    onComplete,
+  }: {
+    profileSlug: string;
+    isGeneral: boolean;
+    sessionId: string;
+    contextMessages: { role: string; content: string }[];
+    onStreamMsg: (text: string) => void;
+    streamMsgId: string;
+    setMsgs: React.Dispatch<React.SetStateAction<Record<string, Message[]>>>;
+    onComplete: (finalText: string) => Promise<void>;
+  }) => {
+    const direct = isGeneral
+      ? "http://127.0.0.1:8642/v1/chat/completions"
+      : `http://127.0.0.1:8642/p/${profileSlug}/v1/chat/completions`;
+    const proxy = isGeneral
+      ? "/api/v1/chat/completions"
+      : `/api/v1/chat/completions?profile=${profileSlug}`;
+
+    const body = JSON.stringify({ model: "hermes-agent", messages: contextMessages, stream: true });
+
+    const tryFetch = (url: string, extra: Record<string, string> = {}) =>
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Hermes-Session-Id": sessionId, ...extra },
+        body,
+      });
+
+    try {
+      let res = await tryFetch(direct, { Authorization: "Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef" });
+      if (!res.ok) res = await tryFetch(proxy);
+
+      if (res.ok && res.body) {
+        setIsTyping(false);
+        await consumeSSEStream(
+          res,
+          onStreamMsg,
+          onComplete
+        );
+        return;
+      }
+    } catch {}
+
+    // Proxy fallback
+    try {
+      const res = await tryFetch(proxy);
+      if (res.ok && res.body) {
+        setIsTyping(false);
+        await consumeSSEStream(res, onStreamMsg, onComplete);
+        return;
+      }
+    } catch {}
+
+    setIsTyping(false);
+  };
+
+  // ── Send NEW message in channel → creates thread ──────────────────────────
+
+  const handleChannelSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !activeChannelId) return;
+    if (!channelInput.trim() || !activeChannelId || channelObj.isDeactivated) return;
 
-    const userText = input.trim();
-    setInput("");
+    const userText = channelInput.trim();
+    setChannelInput("");
 
     const displaySender = user?.email ? user.email.split("@")[0] : "You";
 
-    const newMsg: Message = {
-      id: `local-${Date.now()}`,
+    // 1. Create thread
+    let newThread: Thread | null = null;
+    try {
+      const res = await fetch("/api/v1/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: activeChannelId, title: userText }),
+      });
+      if (res.ok) {
+        const { thread } = await res.json();
+        newThread = thread;
+      }
+    } catch {}
+
+    // If thread creation failed (e.g., table not yet created), notify and bail
+    if (!newThread) {
+      addToast("Run the Feature 2 migration in Supabase first — see supabase/feature2_threads_migration.sql", "danger");
+      return;
+    }
+
+    // 2. Open thread panel immediately
+    setActiveThread(newThread);
+    setThreadPanelExpanded(false);
+
+    const threadId = newThread.id;
+    const sessionId = `session-thread-${threadId}`;
+
+    // 3. Add user message to local state
+    const userMsgId = `local-user-${Date.now()}`;
+    const userMsg: Message = {
+      id: userMsgId,
       sender: displaySender,
       role: "Workspace CEO",
-      avatarColor: "#1E1F24",
       text: userText,
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       isAgent: false,
+      thread_id: threadId,
     };
 
-    setMessages((prev) => ({
+    setThreadMessages((prev) => ({
       ...prev,
-      [activeChannelId]: [...(prev[activeChannelId] || []), newMsg],
+      [threadId]: [...(prev[threadId] || []), userMsg],
     }));
 
-    // Persist user message to Supabase
+    // 4. Persist user message
     try {
-      const { data: inserted } = await supabase.from("messages").insert([{
+      const { data } = await supabase.from("messages").insert([{
         channel_id: activeChannelId,
+        thread_id: threadId,
         user_id: user?.id,
         sender_name: displaySender,
         sender_role: "Workspace CEO",
@@ -557,696 +641,557 @@ export default function DashboardView() {
         is_agent: false,
       }]).select("id");
 
-      // Replace local ID with real DB ID
-      if (inserted?.[0]?.id) {
-        const realId = inserted[0].id;
-        setMessages((prev) => ({
+      if (data?.[0]?.id) {
+        setThreadMessages((prev) => ({
           ...prev,
-          [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-            m.id === newMsg.id ? { ...m, id: realId } : m
+          [threadId]: (prev[threadId] || []).map((m) =>
+            m.id === userMsgId ? { ...m, id: data[0].id } : m
           ),
         }));
       }
     } catch {}
 
-    const activeChan = channels.find((c) => c.id === activeChannelId);
-    const isMultiAgent = activeChan?.agents && activeChan.agents.length > 1;
-
-    // ─ Call Hermes agent ───────────────────────────────────────────────────
-
-    const chanName = (activeChan?.name || "general")
-      .toLowerCase()
-      .replace(/-agent$/, "")
-      .trim();
-    const isGeneral = chanName === "general" || chanName === "sprint-planning";
-    const profileSlug = chanName.replace(/[^a-z0-9_-]/g, "");
-    const directEndpoint = isGeneral
-      ? "http://127.0.0.1:8642/v1/chat/completions"
-      : `http://127.0.0.1:8642/p/${profileSlug}/v1/chat/completions`;
-    const proxyEndpoint = isGeneral
-      ? "/api/v1/chat/completions"
-      : `/api/v1/chat/completions?profile=${profileSlug}`;
-
-    const botSender = isGeneral
-      ? "Dev-Bot"
-      : profileSlug
-          .split(/[-_]/)
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(" ");
-    const botRole = isGeneral ? "Senior AI Engineer" : `${botSender} Agent`;
-
-    setIsTyping(true);
-    const botMsgId = `streaming-${Date.now()}`;
-
-    setMessages((prev) => ({
+    // 5. Update thread list
+    setThreads((prev) => ({
       ...prev,
-      [activeChannelId]: [
-        ...(prev[activeChannelId] || []),
-        {
-          id: botMsgId,
-          sender: botSender,
-          role: botRole,
-          avatarColor: "#1E1F24",
-          text: "",
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          isStreaming: true,
-          isAgent: true,
-        },
-      ],
+      [activeChannelId]: [newThread!, ...(prev[activeChannelId] || [])],
     }));
 
-    const currentSessionId =
-      sessionsMap[channelObj.name] || `session-${channelObj.name}-stable`;
+    // 6. Call Hermes agent (fresh session = new thread context)
+    const agentName = isSystemChannel ? "Dev-Bot" : toProfileSlug(channelObj.name).split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    const agentRole = isSystemChannel ? "Senior AI Engineer" : `${agentName} Agent`;
+    const streamMsgId = `streaming-${Date.now()}`;
 
-    const tryFetch = async (endpoint: string, extraHeaders: Record<string, string> = {}) => {
-      return fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Hermes-Session-Id": currentSessionId,
-          ...extraHeaders,
-        },
-        body: JSON.stringify({
-          model: "hermes-agent",
-          messages: [{ role: "user", content: userText }],
-          stream: true,
-        }),
-      });
-    };
+    setIsTyping(true);
+    setThreadMessages((prev) => ({
+      ...prev,
+      [threadId]: [...(prev[threadId] || []), {
+        id: streamMsgId,
+        sender: agentName,
+        role: agentRole,
+        text: "",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isStreaming: true,
+        isAgent: true,
+        thread_id: threadId,
+      }],
+    }));
 
-    const saveAgentMessage = async (finalText: string) => {
-      try {
-        const { data: inserted } = await supabase.from("messages").insert([{
-          channel_id: activeChannelId,
-          sender_name: botSender,
-          sender_role: botRole,
-          text: finalText,
-          is_agent: true,
-        }]).select("id");
-
-        // Replace streaming ID with real DB ID
-        if (inserted?.[0]?.id) {
-          const realId = inserted[0].id;
-          setMessages((prev) => ({
-            ...prev,
-            [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-              m.id === botMsgId ? { ...m, id: realId, isStreaming: false } : m
-            ),
-          }));
-        }
-      } catch {}
-    };
-
-    try {
-      let response = await tryFetch(directEndpoint, {
-        Authorization: "Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef",
-      });
-
-      if (!response.ok) response = await tryFetch(proxyEndpoint);
-
-      if (response.ok && response.body) {
-        setIsTyping(false);
-        await consumeSSEStream(
-          response,
-          (currentText) => {
-            setMessages((prev) => ({
-              ...prev,
-              [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-                m.id === botMsgId ? { ...m, text: currentText, isStreaming: true } : m
-              ),
-            }));
-          },
-          async (finalText) => {
-            setMessages((prev) => ({
-              ...prev,
-              [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-                m.id === botMsgId ? { ...m, text: finalText, isStreaming: false } : m
-              ),
-            }));
-            await saveAgentMessage(finalText);
-
-            if (isMultiAgent) {
-              setAgentTurnCount(1);
-              setIsAutoLoopActive(true);
-              setTimeout(() => triggerAgentTurn(1), 1500);
-            }
-          }
-        );
-      } else {
-        setIsTyping(false);
-        setMessages((prev) => ({
+    await callAgent({
+      profileSlug: isSystemChannel ? "" : toProfileSlug(channelObj.name),
+      isGeneral: isSystemChannel,
+      sessionId,
+      contextMessages: [{ role: "user", content: userText }],
+      onStreamMsg: (text) => {
+        setThreadMessages((prev) => ({
           ...prev,
-          [activeChannelId]: (prev[activeChannelId] || []).filter(
-            (m) => m.id !== botMsgId
+          [threadId]: (prev[threadId] || []).map((m) =>
+            m.id === streamMsgId ? { ...m, text, isStreaming: true } : m
+          ),
+        }));
+      },
+      streamMsgId,
+      setMsgs: setThreadMessages,
+      onComplete: async (finalText) => {
+        setThreadMessages((prev) => ({
+          ...prev,
+          [threadId]: (prev[threadId] || []).map((m) =>
+            m.id === streamMsgId ? { ...m, text: finalText, isStreaming: false } : m
+          ),
+        }));
+
+        // Persist agent reply
+        try {
+          await supabase.from("messages").insert([{
+            channel_id: activeChannelId,
+            thread_id: threadId,
+            sender_name: agentName,
+            sender_role: agentRole,
+            text: finalText,
+            is_agent: true,
+          }]);
+        } catch {}
+
+        // Update thread reply count
+        try {
+          await fetch(`/api/v1/threads?thread_id=${threadId}`, { method: "PATCH" });
+          fetchThreads(activeChannelId);
+        } catch {}
+      },
+    });
+  };
+
+  // ── Reply in thread ───────────────────────────────────────────────────────
+
+  const handleThreadReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!threadInput.trim() || !activeThread) return;
+
+    const userText = threadInput.trim();
+    setThreadInput("");
+
+    const threadId = activeThread.id;
+    const sessionId = `session-thread-${threadId}`;
+    const displaySender = user?.email ? user.email.split("@")[0] : "You";
+
+    // Add user message locally
+    const userMsgId = `local-reply-${Date.now()}`;
+    const userMsg: Message = {
+      id: userMsgId,
+      sender: displaySender,
+      role: "Workspace CEO",
+      text: userText,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      isAgent: false,
+      thread_id: threadId,
+    };
+
+    setThreadMessages((prev) => ({
+      ...prev,
+      [threadId]: [...(prev[threadId] || []), userMsg],
+    }));
+
+    // Persist
+    try {
+      const { data } = await supabase.from("messages").insert([{
+        channel_id: activeChannelId,
+        thread_id: threadId,
+        user_id: user?.id,
+        sender_name: displaySender,
+        sender_role: "Workspace CEO",
+        text: userText,
+        is_agent: false,
+      }]).select("id");
+
+      if (data?.[0]?.id) {
+        setThreadMessages((prev) => ({
+          ...prev,
+          [threadId]: (prev[threadId] || []).map((m) =>
+            m.id === userMsgId ? { ...m, id: data[0].id } : m
           ),
         }));
       }
-    } catch {
-      try {
-        const fallback = await tryFetch(proxyEndpoint);
-        if (fallback.ok && fallback.body) {
-          setIsTyping(false);
-          await consumeSSEStream(
-            fallback,
-            (currentText) => {
-              setMessages((prev) => ({
-                ...prev,
-                [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-                  m.id === botMsgId ? { ...m, text: currentText, isStreaming: true } : m
-                ),
-              }));
-            },
-            async (finalText) => {
-              setMessages((prev) => ({
-                ...prev,
-                [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-                  m.id === botMsgId ? { ...m, text: finalText, isStreaming: false } : m
-                ),
-              }));
-              await saveAgentMessage(finalText);
+    } catch {}
 
-              if (isMultiAgent) {
-                setAgentTurnCount(1);
-                setIsAutoLoopActive(true);
-                setTimeout(() => triggerAgentTurn(1), 1500);
-              }
-            }
-          );
-        } else {
-          setIsTyping(false);
-          setMessages((prev) => ({
-            ...prev,
-            [activeChannelId]: (prev[activeChannelId] || []).filter(
-              (m) => m.id !== botMsgId
-            ),
-          }));
-        }
-      } catch {
-        setIsTyping(false);
-        setMessages((prev) => ({
-          ...prev,
-          [activeChannelId]: (prev[activeChannelId] || []).filter(
-            (m) => m.id !== botMsgId
-          ),
-        }));
-      }
-    }
-  };
+    // Build context from this thread's messages only
+    const currentMsgs = threadMessages[threadId] || [];
+    const contextMessages = currentMsgs
+      .filter((m) => !m.isStreaming)
+      .slice(-10)
+      .map((m) => ({
+        role: m.isAgent ? "assistant" : "user",
+        content: m.text,
+      }));
+    contextMessages.push({ role: "user", content: userText });
 
-  // ── Multi-agent turn loop ──────────────────────────────────────────────────
-
-  const triggerAgentTurn = async (currentTurnCount: number) => {
-    if (currentTurnCount >= 5) {
-      setRequiresApproval(true);
-      setIsAutoLoopActive(false);
-      return;
-    }
-
-    const chanMsgs = messages[activeChannelId] || [];
-    if (chanMsgs.length === 0) return;
-    const lastMsg = chanMsgs[chanMsgs.length - 1];
-    const isNextPeter = lastMsg.sender === "Dev-Bot";
-
-    const nextSender = isNextPeter ? "Peter" : "Dev-Bot";
-    const nextRole = isNextPeter ? "Specialist Agent (Peter)" : "Senior AI Engineer";
-    const directEndpoint = isNextPeter
-      ? "http://127.0.0.1:8642/p/peter/v1/chat/completions"
-      : "http://127.0.0.1:8642/v1/chat/completions";
-    const proxyEndpoint = isNextPeter
-      ? "/api/v1/chat/completions?profile=peter"
-      : "/api/v1/chat/completions";
-
-    const contextMsgs = chanMsgs.slice(-6).map((m) => ({
-      role:
-        m.sender === "You" || m.sender.includes("@") ? "user" : "assistant",
-      content: `${m.sender}: ${m.text}`,
-    }));
+    const agentName = isSystemChannel ? "Dev-Bot" : toProfileSlug(channelObj.name).split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    const agentRole = isSystemChannel ? "Senior AI Engineer" : `${agentName} Agent`;
+    const streamMsgId = `streaming-reply-${Date.now()}`;
 
     setIsTyping(true);
-    const botMsgId = `agent-turn-${Date.now()}`;
-
-    setMessages((prev) => ({
+    setThreadMessages((prev) => ({
       ...prev,
-      [activeChannelId]: [
-        ...(prev[activeChannelId] || []),
-        {
-          id: botMsgId,
-          sender: nextSender,
-          role: nextRole,
-          avatarColor: isNextPeter ? "#4F46E5" : "#1E1F24",
-          text: "",
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          isStreaming: true,
-          isAgent: true,
-        },
-      ],
+      [threadId]: [...(prev[threadId] || []), {
+        id: streamMsgId,
+        sender: agentName,
+        role: agentRole,
+        text: "",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isStreaming: true,
+        isAgent: true,
+        thread_id: threadId,
+      }],
     }));
 
-    try {
-      let response = await fetch(directEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization":
-            "Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef",
-        },
-        body: JSON.stringify({
-          model: "hermes-agent",
-          messages: contextMsgs,
-          stream: true,
-        }),
-      });
-      if (!response.ok) {
-        response = await fetch(proxyEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "hermes-agent",
-            messages: contextMsgs,
-            stream: true,
-          }),
-        });
-      }
+    await callAgent({
+      profileSlug: isSystemChannel ? "" : toProfileSlug(channelObj.name),
+      isGeneral: isSystemChannel,
+      sessionId,
+      contextMessages,
+      onStreamMsg: (text) => {
+        setThreadMessages((prev) => ({
+          ...prev,
+          [threadId]: (prev[threadId] || []).map((m) =>
+            m.id === streamMsgId ? { ...m, text, isStreaming: true } : m
+          ),
+        }));
+      },
+      streamMsgId,
+      setMsgs: setThreadMessages,
+      onComplete: async (finalText) => {
+        setThreadMessages((prev) => ({
+          ...prev,
+          [threadId]: (prev[threadId] || []).map((m) =>
+            m.id === streamMsgId ? { ...m, text: finalText, isStreaming: false } : m
+          ),
+        }));
 
-      if (response.ok && response.body) {
-        setIsTyping(false);
-        await consumeSSEStream(
-          response,
-          (currentText) => {
-            setMessages((prev) => ({
-              ...prev,
-              [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-                m.id === botMsgId
-                  ? { ...m, text: currentText, isStreaming: true }
-                  : m
-              ),
-            }));
-          },
-          async (finalText) => {
-            setMessages((prev) => ({
-              ...prev,
-              [activeChannelId]: (prev[activeChannelId] || []).map((m) =>
-                m.id === botMsgId
-                  ? { ...m, text: finalText, isStreaming: false }
-                  : m
-              ),
-            }));
+        try {
+          await supabase.from("messages").insert([{
+            channel_id: activeChannelId,
+            thread_id: threadId,
+            sender_name: agentName,
+            sender_role: agentRole,
+            text: finalText,
+            is_agent: true,
+          }]);
+        } catch {}
 
-            // Persist agent turn message
-            try {
-              await supabase.from("messages").insert([{
-                channel_id: activeChannelId,
-                sender_name: nextSender,
-                sender_role: nextRole,
-                text: finalText,
-                is_agent: true,
-              }]);
-            } catch {}
-
-            const nextCount = currentTurnCount + 1;
-            setAgentTurnCount(nextCount);
-            if (nextCount >= 5) {
-              setRequiresApproval(true);
-              setIsAutoLoopActive(false);
-            } else {
-              setTimeout(() => triggerAgentTurn(nextCount), 1500);
-            }
-          }
-        );
-      } else {
-        setIsTyping(false);
-      }
-    } catch {
-      setIsTyping(false);
-    }
+        try {
+          await fetch(`/api/v1/threads?thread_id=${threadId}`, { method: "PATCH" });
+          fetchThreads(activeChannelId);
+        } catch {}
+      },
+    });
   };
 
-  // ── Approval continue ──────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
 
-  const handleApproveContinue = () => {
-    setRequiresApproval(false);
-    setAgentTurnCount(0);
-    setIsAutoLoopActive(true);
-    triggerAgentTurn(0);
-  };
-
-  const handleStopConversation = () => {
-    setRequiresApproval(false);
-    setIsAutoLoopActive(false);
-    setAgentTurnCount(0);
-  };
-
-  const channelMessages = messages[activeChannelId] || [];
-
-  // ── Presence for current channel ───────────────────────────────────────────
-
-  const currentProfileSlug = toProfileSlug(channelObj.name);
-  const isSystemChannel =
-    channelObj.name === "general" || channelObj.name === "sprint-planning";
-  const channelAgentOnline = isSystemChannel
-    ? true
-    : isProfileOnline(currentProfileSlug, workers);
-
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const threadPanelWidth = threadPanelExpanded ? "w-[600px]" : "w-[380px]";
 
   return (
     <div className="flex h-full overflow-hidden bg-[#FAF8F5] text-[#1E1F24] select-none">
-      {/* Sidebar */}
+
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <div className="w-64 border-r border-[rgba(0,0,0,0.08)] bg-white flex flex-col shrink-0">
         <div className="p-4 border-b border-[rgba(0,0,0,0.08)] flex items-center justify-between">
           <div>
-            <h2 className="text-xs font-bold text-[#1E1F24]">
-              {orgName || "AI Workspace"}
-            </h2>
+            <h2 className="text-xs font-bold text-[#1E1F24]">{orgName || "AI Workspace"}</h2>
             <p className="text-[10px] text-[#878890]">Real-time Agent Channels</p>
           </div>
           {presenceReady && (
             <span className="text-[9px] font-semibold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded-md">
-              <Wifi size={9} />
-              Live
+              <Wifi size={9} /> Live
             </span>
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          <div>
-            <div className="flex items-center justify-between px-2 mb-1.5">
-              <div className="text-[10px] font-bold text-[#878890] uppercase tracking-wider">
-                CHANNELS
-              </div>
-              <button
-                onClick={() => setCreateChannelModalOpen(true)}
-                className="p-1 rounded-lg text-[#878890] hover:text-[#1E1F24] hover:bg-black/5 transition-all"
-                title="Create New Channel"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="flex items-center justify-between px-2 mb-1.5">
+            <div className="text-[10px] font-bold text-[#878890] uppercase tracking-wider">CHANNELS</div>
+            <button onClick={() => setCreateChannelModalOpen(true)} className="p-1 rounded-lg text-[#878890] hover:text-[#1E1F24] hover:bg-black/5 transition-all" title="Create New Channel">
+              <Plus size={14} />
+            </button>
+          </div>
+          <div className="space-y-0.5">
+            {channels.map((ch) => {
+              const slug = toProfileSlug(ch.name);
+              const isSys = ch.name === "general" || ch.name === "sprint-planning";
+              const online = isSys ? true : isProfileOnline(slug, workers);
+              const isActive = activeChannelId === ch.id;
 
-            <div className="space-y-0.5">
-              {channels.map((ch) => {
-                const slug = toProfileSlug(ch.name);
-                const isSys =
-                  ch.name === "general" || ch.name === "sprint-planning";
-                const online = isSys ? true : isProfileOnline(slug, workers);
-                const isActive = activeChannelId === ch.id;
-
-                return (
-                  <button
-                    key={ch.id}
-                    onClick={() => setActiveChannelId(ch.id)}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
-                      isActive
-                        ? "bg-[#1E1F24] text-white shadow-2xs font-semibold"
-                        : "text-[#52535A] hover:bg-[#FAF8F5]"
-                    } ${ch.isDeactivated ? "opacity-70" : ""}`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <Hash
-                        size={13}
-                        className={isActive ? "text-white" : "text-[#878890]"}
-                      />
-                      <span className="truncate">{ch.name}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {ch.isDeactivated ? (
-                        <span className="text-[9px] font-semibold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-md">
-                          Former
-                        </span>
-                      ) : (
-                        presenceReady &&
-                        !isSys && (
-                          <PresenceDot
-                            online={online}
-                            size={7}
-                          />
-                        )
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+              return (
+                <button
+                  key={ch.id}
+                  onClick={() => setActiveChannelId(ch.id)}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                    isActive ? "bg-[#1E1F24] text-white shadow-2xs font-semibold" : "text-[#52535A] hover:bg-[#FAF8F5]"
+                  } ${ch.isDeactivated ? "opacity-70" : ""}`}
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <Hash size={13} className={isActive ? "text-white" : "text-[#878890]"} />
+                    <span className="truncate">{ch.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {ch.isDeactivated ? (
+                      <span className="text-[9px] font-semibold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-md">Former</span>
+                    ) : (
+                      presenceReady && !isSys && <PresenceDot online={online} size={7} />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* Main Chat Column */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-[#FAF8F5]">
+      {/* ── Channel: Thread list ─────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Header */}
         <div className="h-14 border-b border-[rgba(0,0,0,0.08)] px-6 bg-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <Hash size={16} className="text-[#1E1F24]" />
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-xs font-bold text-[#1E1F24]">
-                  #{channelObj.name}
-                </h3>
+                <h3 className="text-xs font-bold text-[#1E1F24]">#{channelObj.name}</h3>
                 {presenceReady && !isSystemChannel && (
                   <div className="flex items-center gap-1">
                     <PresenceDot online={channelAgentOnline} size={8} />
-                    <span
-                      className={`text-[10px] font-semibold ${
-                        channelAgentOnline
-                          ? "text-emerald-600"
-                          : "text-[#878890]"
-                      }`}
-                    >
+                    <span className={`text-[10px] font-semibold ${channelAgentOnline ? "text-emerald-600" : "text-[#878890]"}`}>
                       {channelAgentOnline ? "Online" : "Offline"}
                     </span>
                   </div>
                 )}
               </div>
-              {isTyping ? (
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-600 animate-pulse">
-                  <Sparkles size={11} className="animate-spin text-amber-500" />
-                  <span>Agent is composing…</span>
-                </div>
-              ) : (
-                <p className="text-[10px] text-[#72737A]">{channelObj.topic}</p>
-              )}
+              <p className="text-[10px] text-[#72737A]">{channelObj.topic}</p>
             </div>
           </div>
-
-          {/* Start Agent Discussion button (multi-agent channels) */}
-          {channelObj.agents &&
-            channelObj.agents.length > 1 &&
-            !isAutoLoopActive &&
-            !requiresApproval && (
-              <button
-                onClick={() => {
-                  const chanMsgs = messages[activeChannelId] || [];
-                  if (chanMsgs.length === 0) return;
-                  setRequiresApproval(false);
-                  setAgentTurnCount(0);
-                  setIsAutoLoopActive(true);
-                  triggerAgentTurn(0);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1E1F24] text-white text-xs font-semibold hover:bg-[#32333A] transition-all shadow-2xs"
-              >
-                <Sparkles size={13} className="text-amber-400 animate-pulse" />
-                <span>Start Agent Discussion</span>
-              </button>
-            )}
+          <div className="text-[10px] text-[#878890] font-medium">
+            {activeChannelThreads.length} thread{activeChannelThreads.length !== 1 ? "s" : ""}
+          </div>
         </div>
 
-        {/* Message Thread */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {/* Thread cards list */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-2">
           {loading ? (
-            <div className="h-full flex items-center justify-center text-xs text-[#878890]">
-              Loading workspace conversation…
-            </div>
-          ) : channelMessages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center max-w-sm mx-auto space-y-2 text-[#878890]">
-              <MessageSquare size={32} className="text-[#878890]/40" />
-              <div className="text-xs font-semibold text-[#1E1F24]">
-                Clean Slate Channel
+            <div className="h-full flex items-center justify-center text-xs text-[#878890]">Loading…</div>
+          ) : activeChannelThreads.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center max-w-xs mx-auto space-y-3 text-[#878890]">
+              <div className="w-14 h-14 rounded-2xl bg-[#1E1F24]/5 flex items-center justify-center">
+                <MessageCircle size={26} className="text-[#878890]/50" />
               </div>
-              <div className="text-[11px]">
-                Send a message to start collaborating with your AI workforce in
-                #{channelObj.name}.
+              <div className="text-xs font-semibold text-[#1E1F24]">No threads yet</div>
+              <div className="text-[11px] leading-relaxed">
+                Send a message below to start your first conversation with {isSystemChannel ? "Dev-Bot" : channelObj.name}.
+                Each message creates a new thread.
               </div>
               {presenceReady && !isSystemChannel && !channelAgentOnline && (
-                <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-700 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
+                <div className="flex items-center gap-1.5 text-[10px] text-amber-700 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
                   <WifiOff size={11} />
-                  <span>
-                    Agent is offline — messages will deliver when Hermes
-                    reconnects
-                  </span>
+                  Agent is offline — messages will queue
                 </div>
               )}
             </div>
           ) : (
-            channelMessages.map((msg, i) => {
-              const prevMsg = i > 0 ? channelMessages[i - 1] : null;
-              const isGrouped = prevMsg && prevMsg.sender === msg.sender;
-
-              // System message (centered, muted)
-              if (msg.isSystem) {
-                return (
-                  <div
-                    key={msg.id}
-                    className="flex items-center justify-center"
-                  >
-                    <span className="text-[11px] text-[#878890] italic bg-black/[0.03] px-3 py-1 rounded-full border border-black/[0.06]">
-                      {msg.text}
-                    </span>
-                  </div>
-                );
-              }
-
-              if (isGrouped) {
-                return (
-                  <div
-                    key={msg.id}
-                    className="flex gap-3.5 text-xs group hover:bg-black/[0.015] px-2.5 py-1 rounded-2xl transition-all border border-transparent hover:border-black/[0.04] -mt-2"
-                  >
-                    <div className="w-[36px] shrink-0 flex justify-end items-center pr-1">
-                      <span className="text-[9px] text-[#878890] font-medium opacity-0 group-hover:opacity-100 transition-opacity select-none">
-                        {msg.time}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="p-3.5 rounded-2xl bg-white border border-[rgba(0,0,0,0.08)] text-[#1E1F24] shadow-xs max-w-3xl leading-relaxed">
-                        <FormattedMessage
-                          content={msg.text}
-                          isStreaming={msg.isStreaming}
-                        />
+            activeChannelThreads.map((thread) => {
+              const isOpen = activeThread?.id === thread.id;
+              return (
+                <motion.button
+                  key={thread.id}
+                  onClick={() => {
+                    setActiveThread(isOpen ? null : thread);
+                    if (!isOpen) setThreadPanelExpanded(false);
+                  }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`w-full text-left p-4 rounded-2xl border transition-all group ${
+                    isOpen
+                      ? "border-[#1E1F24]/20 bg-[#1E1F24]/[0.04] shadow-sm"
+                      : "border-[rgba(0,0,0,0.07)] bg-white hover:border-[rgba(0,0,0,0.14)] hover:shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="shrink-0 mt-0.5">
+                      <div className="w-8 h-8 rounded-xl bg-[#1E1F24]/8 flex items-center justify-center">
+                        <CornerDownRight size={14} className="text-[#878890]" />
                       </div>
                     </div>
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={msg.id}
-                  className="flex gap-3.5 text-xs group hover:bg-black/[0.015] p-2.5 rounded-2xl transition-all border border-transparent hover:border-black/[0.04]"
-                >
-                  <div className="relative shrink-0">
-                    <AgentAvatar name={msg.sender} size={36} />
-                    {msg.isAgent && presenceReady && !isSystemChannel && (
-                      <span className="absolute -bottom-0.5 -right-0.5">
-                        <PresenceDot
-                          online={isProfileOnline(
-                            toProfileSlug(msg.sender),
-                            workers
-                          )}
-                          size={8}
-                        />
-                      </span>
-                    )}
-                  </div>
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1E1F24] text-xs">
-                        {msg.sender}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md bg-[#1E1F24]/5 border border-black/5 text-[10px] font-semibold text-[#52535A]">
-                        {msg.role}
-                      </span>
-                      <span className="text-[10px] text-[#878890] font-medium">
-                        {msg.time}
-                      </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-[#1E1F24] truncate leading-relaxed">
+                        {thread.title}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] text-[#878890]">{timeAgo(thread.last_activity_at)}</span>
+                        {thread.reply_count > 0 && (
+                          <>
+                            <span className="text-[#C4C5CC] text-[10px]">·</span>
+                            <span className="text-[10px] text-[#52535A] font-medium flex items-center gap-1">
+                              <MessageSquare size={10} />
+                              {thread.reply_count} repl{thread.reply_count === 1 ? "y" : "ies"}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div className="p-4 rounded-2xl bg-white border border-[rgba(0,0,0,0.08)] text-[#1E1F24] shadow-xs max-w-3xl leading-relaxed">
-                      <FormattedMessage
-                        content={msg.text}
-                        isStreaming={msg.isStreaming}
-                      />
+                    <div className={`shrink-0 transition-all ${isOpen ? "text-[#1E1F24]" : "text-[#C4C5CC] group-hover:text-[#878890]"}`}>
+                      <ChevronRight size={14} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
                     </div>
                   </div>
-                </div>
+                </motion.button>
               );
             })
           )}
-
-          {isTyping && (
-            <div className="flex items-center gap-2 text-xs text-[#878890] italic pl-2">
-              <Sparkles size={13} className="animate-spin text-amber-500" />
-              <span>Agents are collaborating…</span>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
         </div>
 
-        {/* Approval Banner */}
-        {requiresApproval && (
-          <div className="p-3.5 bg-amber-50 border-t border-b border-amber-200 flex items-center justify-between gap-4 shrink-0">
-            <div className="flex items-center gap-2.5 text-xs font-semibold text-amber-950">
-              <AlertTriangle size={17} className="text-amber-600 shrink-0" />
-              <span>
-                Automated conversation limit reached:{" "}
-                <strong>5 messages exchanged</strong>. Approve to continue or
-                stop discussion.
-              </span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={handleApproveContinue}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-all shadow-2xs"
-              >
-                Approve & Continue (+5 turns)
-              </button>
-              <button
-                onClick={handleStopConversation}
-                className="px-3.5 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition-all"
-              >
-                Stop Conversation
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Offline agent warning strip (above input, only when offline) */}
+        {/* Offline strip */}
         {presenceReady && !isSystemChannel && !channelAgentOnline && !channelObj.isDeactivated && (
           <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 flex items-center gap-2 text-[11px] text-amber-800 font-medium shrink-0">
             <WifiOff size={12} className="text-amber-600 shrink-0" />
-            <span>
-              {channelObj.name} is offline — your message will be queued and
-              delivered when the agent reconnects.
-            </span>
+            {channelObj.name} is offline — your message will queue until the agent reconnects.
           </div>
         )}
 
-        {/* Input Bar */}
+        {/* New thread input (channel level) */}
         {channelObj.isDeactivated ? (
           <div className="p-4 bg-white border-t border-[rgba(0,0,0,0.08)] shrink-0">
             <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-2.5 text-xs text-amber-900 font-semibold">
               <ShieldAlert size={16} className="text-amber-600 shrink-0" />
-              <span>
-                This employee is no longer with the organization. Conversation
-                history is archived.
-              </span>
+              This employee is no longer with the organization. Conversation history is archived.
             </div>
           </div>
         ) : (
-          <form
-            onSubmit={handleSend}
-            className="p-4 bg-white border-t border-[rgba(0,0,0,0.08)] shrink-0"
-          >
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.12)]">
+          <form onSubmit={handleChannelSend} className="p-4 bg-white border-t border-[rgba(0,0,0,0.08)] shrink-0">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.12)] hover:border-[rgba(0,0,0,0.2)] transition-colors focus-within:border-[#1E1F24]">
+              <Plus size={14} className="text-[#878890] shrink-0" />
               <input
                 type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`Message #${channelObj.name}…`}
+                value={channelInput}
+                onChange={(e) => setChannelInput(e.target.value)}
+                placeholder={`New thread in #${channelObj.name}…`}
                 className="bg-transparent outline-none flex-1 text-xs text-[#1E1F24] placeholder-[#878890]"
               />
               <button
                 type="submit"
-                disabled={!input.trim()}
-                className="p-1.5 rounded-lg bg-[#1E1F24] text-white disabled:opacity-40 hover:bg-[#32333A] transition-all"
+                disabled={!channelInput.trim()}
+                className="p-1.5 rounded-lg bg-[#1E1F24] text-white disabled:opacity-40 hover:bg-[#32333A] transition-all shrink-0"
               >
                 <Send size={13} />
               </button>
             </div>
+            <p className="text-[10px] text-[#878890] mt-1.5 pl-1">Each message starts a new thread with {isSystemChannel ? "Dev-Bot" : channelObj.name}</p>
           </form>
         )}
       </div>
 
-      {/* Create Channel Modal */}
+      {/* ── Thread side panel ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {activeThread && (
+          <motion.div
+            key={activeThread.id}
+            initial={{ x: 40, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 40, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 35 }}
+            className={`${threadPanelWidth} border-l border-[rgba(0,0,0,0.08)] bg-white flex flex-col shrink-0 transition-all duration-300`}
+          >
+            {/* Thread header */}
+            <div className="h-14 border-b border-[rgba(0,0,0,0.08)] px-4 flex items-center gap-2 shrink-0">
+              <div className="w-7 h-7 rounded-xl bg-[#1E1F24]/6 flex items-center justify-center shrink-0">
+                <CornerDownRight size={13} className="text-[#878890]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold text-[#1E1F24] truncate">{activeThread.title}</p>
+                <p className="text-[10px] text-[#878890]">
+                  {isTyping ? (
+                    <span className="flex items-center gap-1 text-amber-600 font-semibold animate-pulse">
+                      <Sparkles size={9} className="animate-spin" />
+                      composing…
+                    </span>
+                  ) : (
+                    `Thread · ${activeThread.reply_count} repl${activeThread.reply_count === 1 ? "y" : "ies"}`
+                  )}
+                </p>
+              </div>
+              {/* Expand/Collapse toggle */}
+              <button
+                onClick={() => setThreadPanelExpanded((v) => !v)}
+                title={threadPanelExpanded ? "Collapse thread panel" : "Expand thread panel"}
+                className="p-1.5 rounded-lg text-[#878890] hover:text-[#1E1F24] hover:bg-black/5 transition-all"
+              >
+                {threadPanelExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+              <button
+                onClick={() => setActiveThread(null)}
+                title="Close thread"
+                className="p-1.5 rounded-lg text-[#878890] hover:text-[#1E1F24] hover:bg-black/5 transition-all"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Thread messages */}
+            <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
+              {activeThreadMessages.length === 0 && !isTyping ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-[11px] text-[#878890]">Starting conversation…</div>
+                </div>
+              ) : (
+                activeThreadMessages.map((msg, i) => {
+                  const prev = i > 0 ? activeThreadMessages[i - 1] : null;
+                  const grouped = prev && prev.sender === msg.sender;
+
+                  if (msg.isSystem) {
+                    return (
+                      <div key={msg.id} className="flex justify-center">
+                        <span className="text-[11px] text-[#878890] italic bg-black/[0.03] px-3 py-1 rounded-full border border-black/[0.06]">
+                          {msg.text}
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  if (grouped) {
+                    return (
+                      <div key={msg.id} className="flex gap-3 -mt-1.5 group">
+                        <div className="w-8 shrink-0 flex justify-end items-start pt-1 pr-1">
+                          <span className="text-[9px] text-[#878890] opacity-0 group-hover:opacity-100 transition-opacity">{msg.time}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-[#1E1F24] leading-relaxed p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.07)]">
+                            <FormattedMessage content={msg.text} isStreaming={msg.isStreaming} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={msg.id} className="flex gap-3">
+                      <div className="relative shrink-0">
+                        <AgentAvatar name={msg.sender} size={32} />
+                        {msg.isAgent && presenceReady && !isSystemChannel && (
+                          <span className="absolute -bottom-0.5 -right-0.5">
+                            <PresenceDot online={isProfileOnline(toProfileSlug(msg.sender), workers)} size={7} />
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-[#1E1F24]">{msg.sender}</span>
+                          <span className="text-[10px] text-[#52535A] bg-black/5 px-1.5 py-0.5 rounded-md font-medium">{msg.role}</span>
+                          <span className="text-[10px] text-[#878890]">{msg.time}</span>
+                        </div>
+                        <div className="text-xs text-[#1E1F24] leading-relaxed p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.07)]">
+                          <FormattedMessage content={msg.text} isStreaming={msg.isStreaming} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={threadEndRef} />
+            </div>
+
+            {/* Approval banner inside thread */}
+            {requiresApproval && (
+              <div className="mx-4 mb-2 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-950">
+                  <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+                  5 automated turns reached.
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => { setRequiresApproval(false); setAgentTurnCount(0); }} className="px-2.5 py-1 rounded-lg bg-amber-600 text-white text-[10px] font-bold hover:bg-amber-700 transition-all">Continue</button>
+                  <button onClick={() => { setRequiresApproval(false); setAgentTurnCount(0); }} className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-900 text-[10px] font-semibold hover:bg-amber-50 transition-all">Stop</button>
+                </div>
+              </div>
+            )}
+
+            {/* Thread reply input */}
+            <form onSubmit={handleThreadReply} className="p-4 border-t border-[rgba(0,0,0,0.08)] bg-white shrink-0">
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.12)] hover:border-[rgba(0,0,0,0.2)] transition-colors focus-within:border-[#1E1F24]">
+                <input
+                  type="text"
+                  value={threadInput}
+                  onChange={(e) => setThreadInput(e.target.value)}
+                  placeholder="Reply in thread…"
+                  className="bg-transparent outline-none flex-1 text-xs text-[#1E1F24] placeholder-[#878890]"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={!threadInput.trim()}
+                  className="p-1.5 rounded-lg bg-[#1E1F24] text-white disabled:opacity-40 hover:bg-[#32333A] transition-all shrink-0"
+                >
+                  <Send size={13} />
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Create channel modal ─────────────────────────────────────────── */}
       <AnimatePresence>
         {createChannelModalOpen && (
           <motion.div
@@ -1264,61 +1209,25 @@ export default function DashboardView() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between pb-2 border-b border-[rgba(0,0,0,0.08)]">
-                <h2 className="text-sm font-bold text-[#1E1F24]">
-                  Create Workspace Channel
-                </h2>
-                <button
-                  onClick={() => setCreateChannelModalOpen(false)}
-                  className="btn-icon"
-                >
-                  <X size={15} />
-                </button>
+                <h2 className="text-sm font-bold text-[#1E1F24]">Create Workspace Channel</h2>
+                <button onClick={() => setCreateChannelModalOpen(false)} className="btn-icon"><X size={15} /></button>
               </div>
-
               <div className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
-                    CHANNEL NAME
-                  </label>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">CHANNEL NAME</label>
                   <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5]">
                     <Hash size={14} className="text-[#878890]" />
-                    <input
-                      type="text"
-                      value={newChannelName}
-                      onChange={(e) => setNewChannelName(e.target.value)}
-                      placeholder="e.g. backend-squad or product-ideas"
-                      className="bg-transparent outline-none w-full text-xs text-[#1E1F24] placeholder-[#878890]"
-                      required
-                    />
+                    <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="e.g. backend-squad" className="bg-transparent outline-none w-full text-xs text-[#1E1F24] placeholder-[#878890]" required />
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
-                    TOPIC & DESCRIPTION
-                  </label>
-                  <input
-                    type="text"
-                    value={newChannelTopic}
-                    onChange={(e) => setNewChannelTopic(e.target.value)}
-                    placeholder="e.g. Backend API development & architecture"
-                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] text-xs outline-none focus:border-[#1E1F24]"
-                  />
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">TOPIC</label>
+                  <input type="text" value={newChannelTopic} onChange={(e) => setNewChannelTopic(e.target.value)} placeholder="e.g. Backend API development" className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] text-xs outline-none focus:border-[#1E1F24]" />
                 </div>
               </div>
-
               <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => setCreateChannelModalOpen(false)}
-                  className="btn btn-secondary flex-1 justify-center"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateChannel}
-                  className="btn btn-primary flex-1 justify-center"
-                >
-                  Create Channel
-                </button>
+                <button onClick={() => setCreateChannelModalOpen(false)} className="btn btn-secondary flex-1 justify-center">Cancel</button>
+                <button onClick={handleCreateChannel} className="btn btn-primary flex-1 justify-center">Create Channel</button>
               </div>
             </motion.div>
           </motion.div>
