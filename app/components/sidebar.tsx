@@ -38,31 +38,36 @@ export default function Sidebar({
   const [daemonOnline, setDaemonOnline] = useState(false);
 
   useEffect(() => {
-    let ws: WebSocket | null = null;
     let timer: any = null;
 
-    const connect = () => {
+    const checkHealth = async () => {
       try {
-        ws = new WebSocket("ws://127.0.0.1:8080");
-        ws.onopen = () => setDaemonOnline(true);
-        ws.onclose = () => {
-          setDaemonOnline(false);
-          timer = setTimeout(connect, 3000);
-        };
-        ws.onerror = () => {
-          setDaemonOnline(false);
-        };
+        const res = await fetch("http://127.0.0.1:8642/v1/models", {
+          headers: {
+            Authorization: "Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef",
+          },
+        });
+        if (res.ok) {
+          setDaemonOnline(true);
+        } else {
+          const res2 = await fetch("/api/v1/models");
+          setDaemonOnline(res2.ok);
+        }
       } catch (e) {
-        setDaemonOnline(false);
-        timer = setTimeout(connect, 3000);
+        try {
+          const res2 = await fetch("/api/v1/models");
+          setDaemonOnline(res2.ok);
+        } catch {
+          setDaemonOnline(false);
+        }
       }
     };
 
-    connect();
+    checkHealth();
+    timer = setInterval(checkHealth, 5000);
 
     return () => {
-      if (ws) ws.close();
-      if (timer) clearTimeout(timer);
+      if (timer) clearInterval(timer);
     };
   }, []);
 
@@ -155,7 +160,7 @@ export default function Sidebar({
                 {daemonOnline ? "Engine Online" : "Agents Offline"}
               </div>
               <div className="t-micro truncate" style={{ color: "var(--text-muted)" }}>
-                {daemonOnline ? "ws://127.0.0.1:8080" : "Local engine offline"}
+                {daemonOnline ? "http://127.0.0.1:8642" : "Local engine offline"}
               </div>
             </div>
           </div>

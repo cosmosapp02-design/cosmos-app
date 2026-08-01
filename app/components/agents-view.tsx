@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, X, Check, Code2, Calendar, FileText, Megaphone, Triangle, Server, FlaskConical, Eye, GitMerge, Bot, UserPlus, Key, Cpu, Sparkles, RefreshCw, ShieldAlert,
+  Plus, X, Check, Code2, Calendar, FileText, Megaphone, Triangle, Server, FlaskConical, Eye, GitMerge, Bot, UserPlus, Key, Cpu, Sparkles, RefreshCw, ShieldAlert, CheckCircle2, Terminal, MoreVertical, Edit3, Trash2,
 } from "lucide-react";
 import AgentAvatar from "./agent-avatar";
 import { useToast } from "./toast";
@@ -40,88 +40,262 @@ export default function AgentsView() {
   const [newPrimaryModel, setNewPrimaryModel] = useState("gemini-3.6-flash-lite");
   const [newBackupModel, setNewBackupModel] = useState("claude-3-5-sonnet");
 
+  // Live creation & edit/delete status
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [openMenuAgentId, setOpenMenuAgentId] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [creationStepText, setCreationStepText] = useState("");
+  const [creationLogs, setCreationLogs] = useState<string[]>([]);
+
   const { user } = useAuth();
   const { addToast } = useToast();
 
   const fetchUserAgents = useCallback(async () => {
     setLoading(true);
     try {
-      if (!user) {
-        setAgents([]);
-        setLoading(false);
-        return;
+      // 1. Sync disk Hermes profiles with backend
+      let syncAgents: any[] = [];
+      try {
+        const syncRes = await fetch("/api/v1/agents/sync");
+        if (syncRes.ok) {
+          const resJson = await syncRes.json();
+          if (resJson.agents) syncAgents = resJson.agents;
+        }
+      } catch (e) {}
+
+      // 2. Fetch DB agents
+      let dbAgents: any[] = [];
+      try {
+        const { data } = await supabase.from("agents").select("*");
+        if (data) dbAgents = data;
+      } catch (e) {}
+
+      // 3. Merge agents by normalized name
+      const mergedMap = new Map<string, any>();
+
+      for (const ag of syncAgents) {
+        mergedMap.set(ag.name.toLowerCase(), ag);
       }
 
-      const { data, error } = await supabase
-        .from("agents")
-        .select("*")
-        .eq("user_id", user.id);
-
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        const mapped: Agent[] = data.map((item: any) => ({
-          id: item.id,
-          name: item.name,
-          role: item.role,
-          color: item.avatar_color || "#1E1F24",
-          status: "online",
-          avatar: item.name.charAt(0).toUpperCase(),
-          description: item.purpose || `${item.role} AI employee.`,
-          soul: item.purpose || `I am ${item.name}, operating as ${item.role}.`,
-          primaryModel: item.primary_model || "gemini-3.6-flash-lite",
-          backupModel: item.backup_model || "claude-3-5-sonnet",
-          skills: Array.isArray(item.skills)
-            ? item.skills.map((s: string) => ({ name: s, icon: "Code2", proficiency: 90 }))
-            : [{ name: "Task Execution", icon: "Code2", proficiency: 90 }],
-          stats: { tasksCompleted: 1, tokensSaved: "4k", uptime: "100%" },
-        }));
-        setAgents(mapped);
-      } else {
-        setAgents([]);
+      for (const ag of dbAgents) {
+        mergedMap.set(ag.name.toLowerCase(), ag);
       }
+
+      const allAgentsList = Array.from(mergedMap.values());
+
+      const mapped: Agent[] = allAgentsList.map((item: any, idx: number) => ({
+        id: item.id || `ag-${idx}-${item.name}`,
+        name: item.name,
+        role: item.role || "AI Specialist",
+        color: item.avatar_color || "#1E1F24",
+        status: "online",
+        avatar: item.name.charAt(0).toUpperCase(),
+        description: item.purpose || `${item.role} AI employee.`,
+        soul: item.purpose || `I am ${item.name}, operating as ${item.role}.`,
+        primaryModel: item.primary_model || "nvidia/nemotron-3-super-12",
+        backupModel: item.backup_model || "claude-3-5-sonnet",
+        skills: Array.isArray(item.skills)
+          ? item.skills.map((s: string) => ({ name: s, icon: "Code2", proficiency: 90 }))
+          : [{ name: "Task Execution", icon: "Code2", proficiency: 90 }],
+        stats: { tasksCompleted: 1, tokensSaved: "4k", uptime: "100%" },
+      }));
+
+      setAgents(mapped);
     } catch (err: any) {
       setAgents([]);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     fetchUserAgents();
   }, [fetchUserAgents]);
 
-  const handleUpdateModels = (agentId: string, primary: string, backup: string) => {
-    setAgents((prev) =>
-      prev.map((a) => (a.id === agentId ? { ...a, primaryModel: primary, backupModel: backup } : a))
-    );
+  const handleOpenEditModal = (agent: Agent) => {
+    setEditingAgent(agent);
+    setNewName(agent.name);
+    setNewRole(agent.role);
+    setNewDesc(agent.description);
+    setNewSoul(agent.soul);
+    setNewPrimaryModel(agent.primaryModel);
+    setNewBackupModel(agent.backupModel);
+    setCreateModalOpen(true);
+    setOpenMenuAgentId(null);
+  };
+
+  const handleOpenCreateModal = () => {
+    setEditingAgent(null);
+    setNewName("");
+    setNewRole("");
+    setNewDesc("");
+    setNewSoul("");
+    setNewPrimaryModel("gemini-3.6-flash-lite");
+    setNewBackupModel("claude-3-5-sonnet");
+    setCreateModalOpen(true);
+    setOpenMenuAgentId(null);
+  };
+
+  const handleDeleteAgent = async (agent: Agent) => {
+    setOpenMenuAgentId(null);
+    try {
+      const res = await fetch("/api/v1/agents/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: agent.name,
+          profileName: agent.name.toLowerCase().replace(/\s+/g, "-"),
+        }),
+      });
+      if (res.ok) {
+        addToast(`Agent ${agent.name} fired from Hermes workforce.`, "success");
+        fetchUserAgents();
+      } else {
+        const errJson = await res.json();
+        addToast(errJson.error || "Failed to delete agent.", "danger");
+      }
+    } catch (e: any) {
+      addToast(e.message || "Failed to delete agent.", "danger");
+    }
+  };
+
+  const handleUpdateAgent = async () => {
+    if (!newRole.trim()) return;
+
+    setIsCreating(true);
+    setCreationStepText(`Updating ${newName}'s SOUL.md configuration...`);
+
+    try {
+      const res = await fetch("/api/v1/agents/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          role: newRole,
+          description: newDesc,
+          soul: newSoul,
+          primaryModel: newPrimaryModel,
+          backupModel: newBackupModel,
+          userId: user?.id,
+        }),
+      });
+
+      if (res.ok) {
+        addToast(`Agent ${newName} updated successfully!`, "success");
+        setTimeout(() => {
+          fetchUserAgents();
+          setCreateModalOpen(false);
+          setIsCreating(false);
+          setEditingAgent(null);
+          setNewName("");
+          setNewRole("");
+          setNewDesc("");
+          setNewSoul("");
+          setCreationStepText("");
+        }, 800);
+      } else {
+        const errJson = await res.json();
+        addToast(errJson.error || "Failed to update agent.", "danger");
+        setIsCreating(false);
+      }
+    } catch (err: any) {
+      addToast(err.message || "Failed to update agent.", "danger");
+      setIsCreating(false);
+    }
   };
 
   const handleCreateAgent = async () => {
+    if (editingAgent) {
+      return handleUpdateAgent();
+    }
     if (!newName.trim() || !newRole.trim()) return;
 
+    setIsCreating(true);
+    setCreationStepText("Initializing Hermes agent pipeline...");
+    setCreationLogs([]);
+
     try {
-      const newAgentObj: any = {
-        name: newName,
-        role: newRole,
-        purpose: newDesc || newSoul || `${newRole} AI worker.`,
-        skills: ["TypeScript", "API Integration", "PRDs"],
-        avatar_color: "#1E1F24",
-        user_id: user?.id,
-      };
+      const response = await fetch("/api/v1/agents/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          role: newRole,
+          description: newDesc,
+          soul: newSoul,
+          primaryModel: newPrimaryModel,
+          backupModel: newBackupModel,
+          userId: user?.id,
+        }),
+      });
 
-      const { data, error } = await supabase.from("agents").insert([newAgentObj]).select();
-      if (error) throw error;
+      if (!response.ok || !response.body) {
+        throw new Error("Failed to connect to agent creation pipeline.");
+      }
 
-      fetchUserAgents();
-      setCreateModalOpen(false);
-      setNewName("");
-      setNewRole("");
-      setNewDesc("");
-      setNewSoul("");
-      addToast(`Agent ${newName} (${newRole}) hired!`, "success");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(trimmed.substring(6));
+              if (data.message) {
+                setCreationStepText(data.message);
+                setCreationLogs((prev) => [...prev, data.message]);
+              }
+
+              if (data.status === "completed") {
+                if (user) {
+                  try {
+                    const newAgentObj: any = {
+                      name: newName,
+                      role: newRole,
+                      purpose: newDesc || newSoul || `${newRole} AI worker.`,
+                      primary_model: newPrimaryModel,
+                      backup_model: newBackupModel,
+                      skills: ["TypeScript", "API Integration", "Hermes Profile"],
+                      avatar_color: "#1E1F24",
+                      user_id: user.id,
+                    };
+                    await supabase.from("agents").insert([newAgentObj]);
+                  } catch (e) {}
+                }
+
+                addToast(`Agent ${newName} (${newRole}) hired! Profile created.`, "success");
+
+                setTimeout(() => {
+                  fetchUserAgents();
+                  setCreateModalOpen(false);
+                  setIsCreating(false);
+                  setNewName("");
+                  setNewRole("");
+                  setNewDesc("");
+                  setNewSoul("");
+                  setCreationLogs([]);
+                  setCreationStepText("");
+                }, 1200);
+              } else if (data.status === "error") {
+                addToast(data.message, "danger");
+                setIsCreating(false);
+              }
+            } catch (e) {}
+          }
+        }
+      }
     } catch (err: any) {
       addToast(err.message || "Failed to create agent.", "danger");
+      setIsCreating(false);
     }
   };
 
@@ -145,7 +319,7 @@ export default function AgentsView() {
             <span>API Vault (BYOK)</span>
           </button>
           <button
-            onClick={() => setCreateModalOpen(true)}
+            onClick={handleOpenCreateModal}
             className="btn btn-primary btn-sm rounded-xl px-3.5 py-2 font-semibold shadow-sm"
           >
             <Plus size={14} />
@@ -172,7 +346,7 @@ export default function AgentsView() {
               </p>
             </div>
             <button
-              onClick={() => setCreateModalOpen(true)}
+              onClick={handleOpenCreateModal}
               className="btn btn-primary rounded-xl px-4 py-2 text-xs font-semibold"
             >
               <Plus size={14} />
@@ -196,7 +370,40 @@ export default function AgentsView() {
                         <p className="text-[11px] text-[#72737A] font-medium">{agent.role}</p>
                       </div>
                     </div>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm" />
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm" />
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuAgentId(openMenuAgentId === agent.id ? null : agent.id);
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-black/5 text-[#72737A] transition-colors"
+                          title="Agent Options"
+                        >
+                          <MoreVertical size={15} />
+                        </button>
+
+                        {openMenuAgentId === agent.id && (
+                          <div className="absolute right-0 top-8 z-30 w-36 bg-white rounded-2xl border border-[rgba(0,0,0,0.12)] shadow-lg p-1 text-xs">
+                            <button
+                              onClick={() => handleOpenEditModal(agent)}
+                              className="w-full px-3 py-1.5 rounded-xl flex items-center gap-2 hover:bg-black/5 text-[#1E1F24] font-medium text-left"
+                            >
+                              <Edit3 size={13} className="text-blue-600" />
+                              <span>Edit Agent</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAgent(agent)}
+                              className="w-full px-3 py-1.5 rounded-xl flex items-center gap-2 hover:bg-red-50 text-red-600 font-medium text-left"
+                            >
+                              <Trash2 size={13} className="text-red-500" />
+                              <span>Fire / Remove</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <p className="text-xs text-[#52535A] leading-relaxed mb-4">
@@ -285,7 +492,9 @@ export default function AgentsView() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between pb-2 border-b border-[rgba(0,0,0,0.08)]">
-                <h2 className="text-sm font-bold text-[#1E1F24]">Hire New AI Employee</h2>
+                <h2 className="text-sm font-bold text-[#1E1F24]">
+                  {editingAgent ? `Edit ${editingAgent.name}` : "Hire New AI Employee"}
+                </h2>
                 <button onClick={() => setCreateModalOpen(false)} className="btn-icon">
                   <X size={15} />
                 </button>
@@ -293,13 +502,16 @@ export default function AgentsView() {
 
               <div className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">NAME</label>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">
+                    NAME {editingAgent && "(READ-ONLY)"}
+                  </label>
                   <input
                     type="text"
                     value={newName}
+                    disabled={!!editingAgent}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder="e.g. Nova-Coder"
-                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] text-xs outline-none focus:border-[#1E1F24]"
+                    className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] text-xs outline-none focus:border-[#1E1F24] disabled:bg-black/5 disabled:text-[#878890] disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
@@ -345,13 +557,48 @@ export default function AgentsView() {
               </div>
 
               <div className="flex gap-2 pt-2">
-                <button onClick={() => setCreateModalOpen(false)} className="btn btn-secondary flex-1 justify-center">
+                <button
+                  onClick={() => setCreateModalOpen(false)}
+                  disabled={isCreating}
+                  className="btn btn-secondary flex-1 justify-center disabled:opacity-50"
+                >
                   Cancel
                 </button>
-                <button onClick={handleCreateAgent} className="btn btn-primary flex-1 justify-center">
-                  Hire Agent
+                <button
+                  onClick={handleCreateAgent}
+                  disabled={isCreating || !newName.trim() || !newRole.trim()}
+                  className="btn btn-primary flex-1 justify-center disabled:opacity-50"
+                >
+                  {isCreating
+                    ? (editingAgent ? "Saving..." : "Hiring Agent...")
+                    : (editingAgent ? "Save Changes" : "Hire Agent")}
                 </button>
               </div>
+
+              {/* Live Progress Status Indicator */}
+              {(isCreating || creationLogs.length > 0) && (
+                <div className="p-3.5 rounded-2xl bg-[#FAF8F5] border border-[rgba(0,0,0,0.1)] space-y-2 mt-3 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[#1E1F24]">
+                    {isCreating ? (
+                      <Sparkles size={14} className="animate-spin text-amber-500 shrink-0" />
+                    ) : (
+                      <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+                    )}
+                    <span className="truncate">{creationStepText}</span>
+                  </div>
+
+                  {creationLogs.length > 0 && (
+                    <div className="p-2.5 rounded-xl bg-white border border-[rgba(0,0,0,0.06)] font-mono text-[10.5px] text-[#52535A] space-y-1 max-h-28 overflow-y-auto">
+                      {creationLogs.map((log, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5 leading-snug">
+                          <span className="w-1.2 h-1.2 rounded-full bg-emerald-500 shrink-0" />
+                          <span className="truncate">{log}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
