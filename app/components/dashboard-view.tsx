@@ -632,7 +632,7 @@ export default function DashboardView() {
     // 4. Persist user message
     try {
       const { data } = await supabase.from("messages").insert([{
-        channel_id: activeChannelId,
+        channel_id: newThread.channel_id,
         thread_id: threadId,
         user_id: user?.id,
         sender_name: displaySender,
@@ -703,7 +703,7 @@ export default function DashboardView() {
         // Persist agent reply
         try {
           await supabase.from("messages").insert([{
-            channel_id: activeChannelId,
+            channel_id: newThread.channel_id,
             thread_id: threadId,
             sender_name: agentName,
             sender_role: agentRole,
@@ -754,7 +754,7 @@ export default function DashboardView() {
     // Persist
     try {
       const { data } = await supabase.from("messages").insert([{
-        channel_id: activeChannelId,
+        channel_id: activeThread.channel_id,
         thread_id: threadId,
         user_id: user?.id,
         sender_name: displaySender,
@@ -828,7 +828,7 @@ export default function DashboardView() {
 
         try {
           await supabase.from("messages").insert([{
-            channel_id: activeChannelId,
+            channel_id: activeThread.channel_id,
             thread_id: threadId,
             sender_name: agentName,
             sender_role: agentRole,

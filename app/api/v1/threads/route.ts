@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -12,17 +13,35 @@ function sb() {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
+const UUID_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * Deterministically maps any channel string (e.g. "ch-general", "sprint-planning")
+ * to a valid, consistent UUID string if it's not already a UUID.
+ */
+function toUuid(input: string): string {
+  if (UUID_REGEX.test(input)) {
+    return input;
+  }
+  const norm = input.toLowerCase().trim();
+  const hash = crypto.createHash("md5").update(norm).digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
 /**
  * GET /api/v1/threads?channel_id=...
  * Returns all threads for a channel, newest activity first.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const channelId = searchParams.get("channel_id");
+  const rawChannelId = searchParams.get("channel_id");
 
-  if (!channelId) {
+  if (!rawChannelId) {
     return NextResponse.json({ error: "channel_id is required" }, { status: 400 });
   }
+
+  const channelId = toUuid(rawChannelId);
 
   const { data, error } = await sb()
     .from("threads")
@@ -44,20 +63,21 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { channel_id, title } = body;
+  const { channel_id: rawChannelId, title } = body;
 
-  if (!channel_id || !title) {
+  if (!rawChannelId || !title) {
     return NextResponse.json(
       { error: "channel_id and title are required" },
       { status: 400 }
     );
   }
 
+  const channelId = toUuid(rawChannelId);
   const safeTitle = title.slice(0, 200);
 
   const { data, error } = await sb()
     .from("threads")
-    .insert([{ channel_id, title: safeTitle }])
+    .insert([{ channel_id: channelId, title: safeTitle }])
     .select()
     .single();
 
