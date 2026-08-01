@@ -685,10 +685,6 @@ export default function DashboardView() {
       ? "Senior AI Engineer"
       : (agentInfo?.role || `${agentName} Agent`);
 
-    const systemPromptContent = isSystemChannel
-      ? "You are Dev-Bot, a Senior AI Engineer on the Cosmos platform."
-      : (agentInfo?.purpose || `You are ${agentName}, ${agentRole} in this organization.`);
-
     const streamMsgId = `streaming-${Date.now()}`;
 
     setIsTyping(true);
@@ -710,10 +706,7 @@ export default function DashboardView() {
       profileSlug: isSystemChannel ? "" : profileSlug,
       isGeneral: isSystemChannel,
       sessionId,
-      contextMessages: [
-        { role: "system", content: systemPromptContent },
-        { role: "user", content: `/new\n${userText}` },
-      ],
+      contextMessages: [{ role: "user", content: `/new\n${userText}` }],
       onStreamMsg: (text) => {
         setThreadMessages((prev) => ({
           ...prev,
@@ -815,10 +808,6 @@ export default function DashboardView() {
       ? "Senior AI Engineer"
       : (agentInfo?.role || `${agentName} Agent`);
 
-    const systemPromptContent = isSystemChannel
-      ? "You are Dev-Bot, a Senior AI Engineer on the Cosmos platform."
-      : (agentInfo?.purpose || `You are ${agentName}, ${agentRole} in this organization.`);
-
     const currentMsgs = threadMessages[threadId] || [];
     const historyMsgs = currentMsgs
       .filter((m) => !m.isStreaming)
@@ -829,7 +818,6 @@ export default function DashboardView() {
       }));
 
     const contextMessages = [
-      { role: "system", content: systemPromptContent },
       ...historyMsgs,
       { role: "user", content: userText },
     ];
