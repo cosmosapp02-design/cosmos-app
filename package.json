@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.14.0",
+    "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/ws": "^8.18.1",
@@ -18,7 +19,7 @@
     "async-mutex": "^0.5.0",
     "framer-motion": "^12.43.0",
     "lucide-react": "^1.27.0",
-    "next": "16.2.12",
+    "next": "15.1.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
