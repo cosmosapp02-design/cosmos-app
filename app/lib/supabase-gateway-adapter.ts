@@ -75,8 +75,15 @@ export class SupabaseGatewayAdapter {
     const targetAgent = payload.target_agent || "Zach Adams";
     const profileSlug = toProfileSlug(payload.profile_slug || targetAgent);
 
-    // Verify static port reservation
-    const port = this.getReservedPort(profileSlug);
+    // Verify static port reservation — skip job if agent has no reserved port
+    const port = AGENT_RESERVED_PORTS[profileSlug];
+    if (!port) {
+      console.warn(`[GatewayAdapter] Skipping job — no reserved port for profile '${profileSlug}'. Ignoring.`);
+      await client.from("dispatch_jobs")
+        .update({ status: "failed", completed_at: new Date().toISOString() })
+        .eq("id", job.id);
+      return;
+    }
 
     // Ensure profile directory and SOUL.md exist
     const home = process.env.HOME || "/Users/cosmos";
@@ -208,6 +215,84 @@ export class SupabaseGatewayAdapter {
         },
       ]);
     } catch {}
+
+    // 5. Inter-agent chaining — queue jobs for any agents explicitly @mentioned in response
+    try {
+      // A. Parse [TASK: Title | Agent] blocks for Kanban cards
+      const taskMatches = Array.from(responseText.matchAll(/\[TASK:\s*([^|\]]+)\|?\s*([^\]]*)\]/gi));
+      for (const tm of taskMatches) {
+        const tTitle = tm[1]?.trim();
+        const tAssign = tm[2]?.trim() || targetAgent;
+        if (tTitle) {
+          try {
+            await client.from("tasks").insert([{
+              title: tTitle,
+              assigned_to: tAssign,
+              status: "in_progress",
+              channel_id: channelId,
+              thread_id: threadId || null,
+            }]);
+          } catch {}
+        }
+      }
+
+      // B. Queue follow-up jobs for explicitly @mentioned agents in the response
+      // Safety cap: max 10 agent replies per thread
+      let turnCount = 1;
+      if (threadId) {
+        const { data: tRow } = await client.from("threads").select("reply_count").eq("id", threadId).single();
+        turnCount = tRow?.reply_count ?? 1;
+      }
+
+      if (turnCount < 10) {
+        const CHAIN_AGENTS = [
+          { name: "Zach Adams", slug: "zach_adams", patterns: ["@Zach_Adams", "@Zach"] },
+          { name: "Sara Pate", slug: "sara_pate", patterns: ["@Sara_Pate", "@Sara"] },
+          { name: "Peter", slug: "peter", patterns: ["@Peter"] },
+          { name: "Zara", slug: "zara", patterns: ["@Zara"] },
+        ];
+
+        const toChain: { name: string; slug: string }[] = [];
+        const seen = new Set<string>();
+
+        for (const ag of CHAIN_AGENTS) {
+          // Skip self — don't chain back to the agent that just replied
+          if (ag.slug === profileSlug) continue;
+          for (const pattern of ag.patterns) {
+            if (responseText.includes(pattern) && !seen.has(ag.slug)) {
+              seen.add(ag.slug);
+              toChain.push({ name: ag.name, slug: ag.slug });
+            }
+          }
+        }
+
+        // Insert one queued dispatch job per mentioned agent
+        for (const ag of toChain) {
+          const chainKey = `chain-${ag.slug}-${threadId || channelId}-${Date.now()}-${Math.random()}`;
+          try {
+            await client.from("dispatch_jobs").insert([{
+              channel_id: channelId,
+              thread_id: threadId || null,
+              status: "queued",
+              context_payload: {
+                user_text: `[Message from ${targetAgent}]: "${responseText.slice(0, 400)}" — Please reply with your status and relevant updates for the team.`,
+                sender_name: targetAgent,
+                sender_role: `${targetAgent} Agent`,
+                channel_id: channelId,
+                thread_id: threadId || null,
+                target_agent: ag.name,
+                profile_slug: ag.slug,
+                dispatched_at: new Date().toISOString(),
+              },
+              idempotency_key: chainKey,
+              timeout_seconds: 60,
+            }]);
+          } catch {}
+        }
+      }
+    } catch (chainErr: any) {
+      console.warn("[GatewayAdapter] Chaining warning:", chainErr.message);
+    }
   }
 }
 

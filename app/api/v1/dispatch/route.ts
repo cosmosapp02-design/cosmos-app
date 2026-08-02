@@ -23,20 +23,36 @@ function toProfileSlug(name: string): string {
     .replace(/[^a-z0-9_-]/g, "");
 }
 
-function parseMentionedAgents(text: string): { name: string; slug: string }[] {
-  const KNOWN_AGENTS = [
-    { name: "Peter", slug: "peter", regex: /@?peter/i },
-    { name: "Zara", slug: "zara", regex: /@?zara/i },
-    { name: "Sara Pate", slug: "sara_pate", regex: /@?sara(_pate)?/i },
-    { name: "Zach Adams", slug: "zach_adams", regex: /@?zach(_adams)?/i },
-  ];
+const AGENT_REGISTRY = [
+  { name: "Zach Adams", slug: "zach_adams", patterns: ["@Zach_Adams", "@Zach", "@ZachAdams", "@zach_adams"] },
+  { name: "Sara Pate", slug: "sara_pate", patterns: ["@Sara_Pate", "@Sara", "@SaraPate", "@sara_pate"] },
+  { name: "Peter", slug: "peter", patterns: ["@Peter", "@peter"] },
+  { name: "Zara", slug: "zara", patterns: ["@Zara", "@zara"] },
+];
 
-  const found: { name: string; slug: string }[] = [];
-  for (const ag of KNOWN_AGENTS) {
-    if (ag.regex.test(text)) {
-      found.push(ag);
+/**
+ * Parse EXPLICIT @mention tags from user text and return agents in order of appearance.
+ * Only matches strings beginning with @, never naked names like "Peter" or "Zara".
+ */
+function parseMentionedAgents(text: string): { name: string; slug: string; index: number }[] {
+  const found: { name: string; slug: string; index: number }[] = [];
+  const seen = new Set<string>();
+
+  for (const ag of AGENT_REGISTRY) {
+    for (const pattern of ag.patterns) {
+      // Case-insensitive whole-word match for @pattern
+      const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(text)) !== null) {
+        if (!seen.has(ag.slug)) {
+          seen.add(ag.slug);
+          found.push({ name: ag.name, slug: ag.slug, index: m.index });
+        }
+      }
     }
   }
+
+  found.sort((a, b) => a.index - b.index);
   return found;
 }
 
