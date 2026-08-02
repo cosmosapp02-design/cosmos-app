@@ -95,6 +95,50 @@ function PresenceDot({ online, size = 8 }: { online: boolean; size?: number }) {
   );
 }
 
+// ─── Known org members registry (for @mention highlighting) ──────────────────
+
+const KNOWN_ORG_MEMBERS: Record<string, { displayName: string; color: string }> = {
+  "@zach_adams":  { displayName: "Zach Adams",  color: "#818cf8" },
+  "@zach":        { displayName: "Zach Adams",  color: "#818cf8" },
+  "@zachadams":   { displayName: "Zach Adams",  color: "#818cf8" },
+  "@sara_pate":   { displayName: "Sara Pate",   color: "#f472b6" },
+  "@sara":        { displayName: "Sara Pate",   color: "#f472b6" },
+  "@sarapate":    { displayName: "Sara Pate",   color: "#f472b6" },
+  "@peter":       { displayName: "Peter",       color: "#34d399" },
+  "@zara":        { displayName: "Zara",        color: "#fb923c" },
+};
+
+/** Renders a message string with valid @mentions highlighted, unknown ones plain */
+function MentionText({ text }: { text: string }) {
+  const parts = text.split(/(@[\w_]+)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const key = part.toLowerCase().replace(/_/g, "_");
+        const match = KNOWN_ORG_MEMBERS[key];
+        if (match) {
+          return (
+            <span
+              key={i}
+              title={match.displayName}
+              style={{
+                color: match.color,
+                fontWeight: 600,
+                background: match.color + "22",
+                borderRadius: 4,
+                padding: "0 3px",
+              }}
+            >
+              {part}
+            </span>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 // ─── SSE stream consumer ──────────────────────────────────────────────────────
 
 async function consumeSSEStream(

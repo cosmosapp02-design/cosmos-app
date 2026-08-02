@@ -47,8 +47,8 @@ export class V2Supervisor {
     // 2. Outbound-only Realtime subscription for dispatch_jobs (§4.2 of Spec v2)
     this.subscribeRealtimeJobs();
 
-    // 3. Fallback poll (every 15s) and Heartbeats (every 15s) (§4.3 & §4.4)
-    this.pollTimer = setInterval(() => this.pollQueuedJobs(), 15_000);
+    // 3. Fast poll (every 3s) to catch chained jobs quickly, heartbeat (every 15s)
+    this.pollTimer = setInterval(() => this.pollQueuedJobs(), 3_000);
     this.heartbeatTimer = setInterval(() => this.sendHeartbeats(), 15_000);
 
     // Initial heartbeat
@@ -110,6 +110,9 @@ export class V2Supervisor {
    */
   private subscribeRealtimeJobs() {
     const client = sb();
+    // NOTE: No column filter here — Supabase Realtime column filters require
+    // REPLICA IDENTITY FULL on the table; without it events are silently dropped.
+    // Instead we filter client-side on status === 'queued'.
     client
       .channel("v2-dispatch-jobs")
       .on(
@@ -118,10 +121,9 @@ export class V2Supervisor {
           event: "INSERT",
           schema: "public",
           table: "dispatch_jobs",
-          filter: "status=eq.queued",
         },
         (payload: any) => {
-          if (payload.new) {
+          if (payload.new && payload.new.status === "queued") {
             this.processJob(payload.new);
           }
         }

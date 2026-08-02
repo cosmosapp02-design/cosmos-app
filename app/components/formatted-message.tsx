@@ -11,6 +11,68 @@ interface FormattedMessageProps {
   isStreaming?: boolean;
 }
 
+// ─── Known org members for @mention highlighting ─────────────────────────────
+
+const KNOWN_ORG_MEMBERS: Record<string, { displayName: string; color: string }> = {
+  "@zach_adams": { displayName: "Zach Adams", color: "#818cf8" },
+  "@zach":       { displayName: "Zach Adams", color: "#818cf8" },
+  "@sara_pate":  { displayName: "Sara Pate",  color: "#f472b6" },
+  "@sara":       { displayName: "Sara Pate",  color: "#f472b6" },
+  "@peter":      { displayName: "Peter",      color: "#34d399" },
+  "@zara":       { displayName: "Zara",       color: "#fb923c" },
+};
+
+/**
+ * Renders inline text segments with @mention chips.
+ * Known org members get a colored badge; unknown mentions are rendered plain.
+ */
+function MentionLine({ text }: { text: string }) {
+  const parts = text.split(/(@[\w_]+)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const match = KNOWN_ORG_MEMBERS[part.toLowerCase()];
+        if (match) {
+          return (
+            <span
+              key={i}
+              title={match.displayName}
+              style={{
+                color: match.color,
+                fontWeight: 700,
+                background: match.color + "20",
+                borderRadius: 4,
+                padding: "1px 4px",
+                display: "inline-block",
+              }}
+            >
+              {part}
+            </span>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+/** Walk ReactMarkdown children and apply MentionLine to raw string nodes */
+function renderWithMentions(children: React.ReactNode): React.ReactNode {
+  if (typeof children === "string") {
+    if (children.includes("@")) return <MentionLine text={children} />;
+    return children;
+  }
+  if (Array.isArray(children)) {
+    return children.map((child, i) => {
+      if (typeof child === "string" && child.includes("@")) {
+        return <MentionLine key={i} text={child} />;
+      }
+      return child;
+    });
+  }
+  return children;
+}
+
 export default function FormattedMessage({ content, isStreaming }: FormattedMessageProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
@@ -89,7 +151,7 @@ export default function FormattedMessage({ content, isStreaming }: FormattedMess
             );
           },
           p({ children }) {
-            return <p className="my-1 leading-relaxed">{children}</p>;
+            return <p className="my-1 leading-relaxed">{renderWithMentions(children)}</p>;
           },
           ul({ children }) {
             return <ul className="my-1.5 pl-4 list-disc space-y-0.5">{children}</ul>;
@@ -98,7 +160,7 @@ export default function FormattedMessage({ content, isStreaming }: FormattedMess
             return <ol className="my-1.5 pl-4 list-decimal space-y-0.5">{children}</ol>;
           },
           li({ children }) {
-            return <li className="leading-relaxed">{children}</li>;
+            return <li className="leading-relaxed">{renderWithMentions(children)}</li>;
           },
           strong({ children }) {
             return <strong className="font-bold text-[#1E1F24]">{children}</strong>;
