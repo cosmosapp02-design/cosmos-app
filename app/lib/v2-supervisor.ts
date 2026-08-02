@@ -202,9 +202,9 @@ export class V2Supervisor {
       // Escape user text for shell execution
       const sanitizedInput = userText.replace(/"/g, '\\"');
 
-      // Native Hermes profile execution via HERMES_HOME (§4.1 & §4.2 of Spec v2)
-      // Pass raw user text directly — zero system message or role injection
-      const command = `HERMES_HOME="${profileDir}" ${HERMES_BIN} -z "${sanitizedInput}"`;
+      // Native Hermes profile execution with session memory retention (§4.1 & §4.2 of Spec v2)
+      const sessionId = threadId ? `session-thread-${threadId}` : `session-channel-${channelId}`;
+      const command = `HERMES_HOME="${profileDir}" ${HERMES_BIN} -z "${sanitizedInput}" --resume "${sessionId}"`;
 
       let responseText = "";
 
