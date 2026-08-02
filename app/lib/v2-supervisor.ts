@@ -169,18 +169,34 @@ export class V2Supervisor {
 
     const payload = job.context_payload || {};
     const userText = payload.user_text || "";
-    const profileSlug = payload.profile_slug || "dev_bot";
+    const rawTarget = payload.target_agent || payload.profile_slug || "Dev-Bot";
+    const profileSlug = toProfileSlug(rawTarget);
+    const agentName = payload.target_agent || rawTarget;
     const channelId = payload.channel_id;
     const threadId = payload.thread_id;
-    const agentName = payload.target_agent || "Dev-Bot";
 
     try {
       const startTime = Date.now();
       const profileDir = path.join(PROFILES_DIR, profileSlug);
 
-      // Ensure profile directory exists
+      // Ensure profile directory and SOUL.md exist (§5 of Spec v2)
       if (!fs.existsSync(profileDir)) {
         fs.mkdirSync(profileDir, { recursive: true });
+      }
+
+      const soulPath = path.join(profileDir, "SOUL.md");
+      if (!fs.existsSync(soulPath)) {
+        try {
+          const { data: agData } = await client
+            .from("agents")
+            .select("name, role, purpose")
+            .ilike("name", agentName)
+            .limit(1);
+
+          const ag = agData?.[0];
+          const soulContent = `## Role\n${ag?.role || "AI Specialist"}\n\n## System Instructions & Persona\n${ag?.purpose || `You are ${agentName}, working on the Cosmos platform.`}\n`;
+          fs.writeFileSync(soulPath, soulContent, "utf-8");
+        } catch {}
       }
 
       // Escape user text for shell execution

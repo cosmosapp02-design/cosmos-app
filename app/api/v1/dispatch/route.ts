@@ -49,12 +49,12 @@ export async function POST(req: NextRequest) {
 
     // 1. Resolve channel to get name/agent target
     let channelName = "general";
-    let targetAgentName = "Dev-Bot";
+    let targetAgentName = "";
 
     try {
       const { data: chanData } = await client
         .from("channels")
-        .select("name, agents")
+        .select("name, agents, topic")
         .eq("id", channel_id)
         .single();
 
@@ -62,16 +62,24 @@ export async function POST(req: NextRequest) {
         channelName = chanData.name || "general";
         if (chanData.agents && chanData.agents.length > 0) {
           targetAgentName = chanData.agents[0];
+        } else if (chanData.topic && chanData.topic.includes("/p/")) {
+          const match = chanData.topic.match(/\/p\/([a-z0-9_-]+)/i);
+          if (match) targetAgentName = match[1];
         } else if (
           channelName !== "general" &&
-          channelName !== "sprint-planning"
+          channelName !== "sprint-planning" &&
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(channelName)
         ) {
           targetAgentName = channelName;
         }
       }
     } catch {}
 
-    const profileSlug = toProfileSlug(targetAgentName || channelName);
+    if (!targetAgentName) {
+      targetAgentName = "Dev-Bot";
+    }
+
+    const profileSlug = toProfileSlug(targetAgentName);
 
     // 2. Resolve target agent row from DB
     let agentId: string | null = null;
