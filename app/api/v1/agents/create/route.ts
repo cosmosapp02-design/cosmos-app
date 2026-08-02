@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
         await new Promise((r) => setTimeout(r, 600));
 
         // Step 3: Write SOUL.md configuration
+        const soulFilePath = path.join(profilePath, "SOUL.md");
         const soulContent = `## Role
 ${role}
 
@@ -107,7 +108,7 @@ ${soul || description || `You are ${name}, working as ${role} on the Cosmos AI p
             backup_model: backupModel || "claude-3-5-sonnet",
             skills: ["TypeScript", "API Integration", "Hermes Profile"],
             avatar_color: "#1E1F24",
-            user_id: userId,
+            status: "active",
           };
           await supabase.from("agents").insert([agentObj]);
 

@@ -424,6 +424,11 @@ export default function DashboardView() {
     return () => { supabase.removeChannel(channel); };
   }, [activeChannelId, fetchThreads]);
 
+  // ── Supervisor Daemon Init ──────────────────────────────────────────────────
+  useEffect(() => {
+    fetch("/api/v1/supervisor").catch(() => {});
+  }, []);
+
   // ── Presence ──────────────────────────────────────────────────────────────
 
   const fetchPresence = useCallback(async () => {
@@ -702,6 +707,21 @@ export default function DashboardView() {
       }],
     }));
 
+    // Enqueue dispatch job in Supabase queue
+    try {
+      fetch("/api/v1/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: newThread.channel_id,
+          thread_id: threadId,
+          user_text: userText,
+          sender_name: displaySender,
+          sender_role: "Workspace CEO",
+        }),
+      }).catch(() => {});
+    } catch {}
+
     await callAgent({
       profileSlug: isSystemChannel ? "" : profileSlug,
       isGeneral: isSystemChannel,
@@ -838,6 +858,21 @@ export default function DashboardView() {
         thread_id: threadId,
       }],
     }));
+
+    // Enqueue dispatch job in Supabase queue
+    try {
+      fetch("/api/v1/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: activeThread.channel_id,
+          thread_id: threadId,
+          user_text: userText,
+          sender_name: displaySender,
+          sender_role: "Workspace CEO",
+        }),
+      }).catch(() => {});
+    } catch {}
 
     await callAgent({
       profileSlug: isSystemChannel ? "" : profileSlug,
