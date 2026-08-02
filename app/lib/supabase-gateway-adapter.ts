@@ -107,24 +107,36 @@ export class SupabaseGatewayAdapter {
     let responseText = "";
 
     try {
-      const { stdout } = await execAsync(command, {
-        timeout: 45_000,
+      const { stdout, stderr } = await execAsync(command, {
+        timeout: 60_000,
         env: {
           ...process.env,
           HERMES_HOME: profileDir,
         },
       });
-      responseText = stdout.trim();
+
+      const rawCombined = `${stdout || ""}\n${stderr || ""}`;
+      // Clean ANSI escape sequences
+      const cleaned = rawCombined
+        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
+        .replace(/^WARNING.*$/gm, "")
+        .replace(/^◇ injected env.*$/gm, "")
+        .trim();
+
+      responseText = cleaned || stdout.trim();
     } catch (execErr: any) {
-      if (execErr.stdout && execErr.stdout.trim()) {
-        responseText = execErr.stdout.trim();
-      } else {
-        responseText = `Task received by ${targetAgent}. Processing complete.`;
-      }
+      const rawErr = `${execErr.stdout || ""}\n${execErr.stderr || ""}`;
+      const cleaned = rawErr
+        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
+        .replace(/^WARNING.*$/gm, "")
+        .replace(/^◇ injected env.*$/gm, "")
+        .trim();
+
+      responseText = cleaned || execErr.message || "No output returned from agent.";
     }
 
     if (!responseText) {
-      responseText = `Task completed by ${targetAgent}.`;
+      responseText = "Agent completed execution.";
     }
 
     const durationMs = Date.now() - startTime;
