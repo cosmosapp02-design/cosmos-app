@@ -198,7 +198,7 @@ export default function DashboardView() {
         setActiveThread(newThread);
 
         // 2. Insert CEO directive message
-        const directiveText = `CEO DIRECTIVE: ${goalText}\n\nTeam: Please convene an autonomous meeting. @Zach_Adams (PM) please lead, @Sara_Pate (Designer) design mockups, @Peter (Engineer) build code, and @Zara (Marketing) launch research. Create task cards using [TASK: Title | Agent] format.`;
+        const directiveText = `[EXECUTIVE DIRECTIVE FROM CEO]\nProject Goal: ${goalText}\n\nZach Adams (Product Manager): You are leading this project meeting. Immediately convene your team by issuing task cards formatted as [TASK: Task Title | AgentName] for @Sara_Pate (Design), @Peter (Engineering), and @Zara (Marketing), and outline the execution plan.`;
 
         await supabase.from("messages").insert([{
           channel_id: activeChannelId,
@@ -430,37 +430,22 @@ export default function DashboardView() {
   useEffect(() => {
     if (!activeThread) return;
     const threadId = activeThread.id;
+    fetchThreadMessages(threadId);
 
     const channel = supabase
-      .channel(`thread-messages:${threadId}`)
+      .channel(`thread-messages-${threadId}`)
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "messages",
-          filter: `thread_id=eq.${threadId}`,
         },
         (payload: any) => {
-          const m = payload.new;
-          const newMsg: Message = {
-            id: m.id,
-            sender: m.sender_name || "Unknown",
-            role: m.sender_role || (m.is_agent ? "Agent" : "CEO"),
-            text: m.text || "",
-            time: new Date(m.created_at || Date.now()).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            isAgent: !!m.is_agent,
-            thread_id: m.thread_id,
-          };
-
-          setThreadMessages((prev) => {
-            const current = prev[threadId] || [];
-            if (current.some((msg) => msg.id === m.id)) return prev;
-            return { ...prev, [threadId]: [...current, newMsg] };
-          });
+          if (payload.new && payload.new.thread_id === threadId) {
+            fetchThreadMessages(threadId);
+            fetchThreads(activeChannelId);
+          }
         }
       )
       .subscribe();
