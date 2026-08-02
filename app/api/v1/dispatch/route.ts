@@ -23,6 +23,23 @@ function toProfileSlug(name: string): string {
     .replace(/[^a-z0-9_-]/g, "");
 }
 
+function parseMentionedAgents(text: string): { name: string; slug: string }[] {
+  const KNOWN_AGENTS = [
+    { name: "Peter", slug: "peter", regex: /@?peter/i },
+    { name: "Zara", slug: "zara", regex: /@?zara/i },
+    { name: "Sara Pate", slug: "sara_pate", regex: /@?sara(_pate)?/i },
+    { name: "Zach Adams", slug: "zach_adams", regex: /@?zach(_adams)?/i },
+  ];
+
+  const found: { name: string; slug: string }[] = [];
+  for (const ag of KNOWN_AGENTS) {
+    if (ag.regex.test(text)) {
+      found.push(ag);
+    }
+  }
+  return found;
+}
+
 /**
  * POST /api/v1/dispatch
  * Receives user chat input, resolves agent target, enforces guardrails,
@@ -48,9 +65,16 @@ export async function POST(req: NextRequest) {
 
     const client = sb();
 
-    // 1. Resolve channel or explicit target_agent in payload
+    // 1. Resolve channel or explicit target_agent or @mentions in payload
     let channelName = "general";
     let targetAgentName = body.target_agent || body.target_agent_name || "";
+
+    if (!targetAgentName) {
+      const mentions = parseMentionedAgents(user_text);
+      if (mentions.length > 0) {
+        targetAgentName = mentions[0].name;
+      }
+    }
 
     if (!targetAgentName) {
       try {

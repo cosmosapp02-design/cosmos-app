@@ -337,20 +337,22 @@ export class V2Supervisor {
         }
 
         if (threadTurnCount < 10) {
-          const mentionMatches = Array.from(responseText.matchAll(/@([a-zA-Z0-9_-]+)/g));
-          const mentionedSlugs = new Set<string>();
+          const KNOWN_AGENTS = [
+            { name: "Peter", slug: "peter", regex: /@?peter/i },
+            { name: "Zara", slug: "zara", regex: /@?zara/i },
+            { name: "Sara Pate", slug: "sara_pate", regex: /@?sara(_pate)?/i },
+            { name: "Zach Adams", slug: "zach_adams", regex: /@?zach(_adams)?/i },
+          ];
 
-          for (const mm of mentionMatches) {
-            const tag = mm[1].trim();
-            const tagSlug = toProfileSlug(tag);
-            if (tagSlug && tagSlug !== profileSlug && tagSlug !== "dev_bot") {
-              mentionedSlugs.add(tagSlug);
+          const mentionedSlugs = new Set<string>();
+          for (const ag of KNOWN_AGENTS) {
+            if (ag.slug !== profileSlug && ag.regex.test(responseText)) {
+              mentionedSlugs.add(ag.slug);
             }
           }
 
           // Auto-enqueue job for each mentioned agent
           for (const mSlug of Array.from(mentionedSlugs)) {
-            const rawKey = `auto-chain-${channelId}-${threadId || "main"}-${mSlug}-${Date.now()}`;
             const idempotency_key = `dispatch-${mSlug}-${Date.now()}-${Math.random()}`;
 
             await client.from("dispatch_jobs").insert([{
