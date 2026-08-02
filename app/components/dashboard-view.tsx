@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Hash, Plus, Sparkles, MessageSquare, AlertTriangle,
   ShieldAlert, X, WifiOff, Wifi, ChevronRight, Maximize2, Minimize2,
-  MessageCircle, ArrowLeft, CornerDownRight, Cpu
+  MessageCircle, ArrowLeft, CornerDownRight, Cpu, Users, Play
 } from "lucide-react";
 import AgentAvatar from "./agent-avatar";
 import FormattedMessage from "./formatted-message";
@@ -170,6 +170,70 @@ export default function DashboardView() {
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelTopic, setNewChannelTopic] = useState("");
+
+  // Autonomous Meeting Launcher Modal State
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
+  const [meetingGoal, setMeetingGoal] = useState("");
+  const [meetingStarting, setMeetingStarting] = useState(false);
+
+  const handleStartAutonomousMeeting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!meetingGoal.trim() || meetingStarting) return;
+    setMeetingStarting(true);
+
+    const goalText = meetingGoal.trim();
+    const displaySender = user?.email ? user.email.split("@")[0] : "CEO";
+
+    try {
+      // 1. Create thread for meeting
+      const title = `[Meeting] ${goalText.slice(0, 50)}`;
+      const res = await fetch("/api/v1/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: activeChannelId, title }),
+      });
+      const data = await res.json();
+      if (res.ok && data.thread) {
+        const newThread = data.thread;
+        setActiveThread(newThread);
+
+        // 2. Insert CEO directive message
+        const directiveText = `CEO DIRECTIVE: ${goalText}\n\nTeam: Please convene an autonomous meeting. @Zach_Adams (PM) please lead, @Sara_Pate (Designer) design mockups, @Peter (Engineer) build code, and @Zara (Marketing) launch research. Create task cards using [TASK: Title | Agent] format.`;
+
+        await supabase.from("messages").insert([{
+          channel_id: activeChannelId,
+          thread_id: newThread.id,
+          user_id: user?.id,
+          sender_name: displaySender,
+          sender_role: "Workspace CEO",
+          text: directiveText,
+          is_agent: false,
+        }]);
+
+        // 3. Dispatch to Zach Adams (PM)
+        await fetch("/api/v1/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel_id: activeChannelId,
+            thread_id: newThread.id,
+            user_text: directiveText,
+            sender_name: displaySender,
+            sender_role: "Workspace CEO",
+          }),
+        });
+
+        addToast("Autonomous Team Meeting Started!", "success");
+        setMeetingGoal("");
+        setMeetingModalOpen(false);
+        fetchThreads(activeChannelId);
+      }
+    } catch (err: any) {
+      addToast(err?.message || "Failed to start meeting", "danger");
+    } finally {
+      setMeetingStarting(false);
+    }
+  };
 
   const threadEndRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
@@ -889,8 +953,18 @@ export default function DashboardView() {
               <p className="text-[10px] text-[#72737A]">{channelObj.topic}</p>
             </div>
           </div>
-          <div className="text-[10px] text-[#878890] font-medium">
-            {activeChannelThreads.length} thread{activeChannelThreads.length !== 1 ? "s" : ""}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMeetingModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-all shadow-sm active:scale-98"
+              title="Launch an autonomous inter-agent meeting"
+            >
+              <Users size={13} />
+              <span>Run Team Meeting</span>
+            </button>
+            <div className="text-[10px] text-[#878890] font-medium">
+              {activeChannelThreads.length} thread{activeChannelThreads.length !== 1 ? "s" : ""}
+            </div>
           </div>
         </div>
 
@@ -1207,6 +1281,100 @@ export default function DashboardView() {
                 <button onClick={() => setCreateChannelModalOpen(false)} className="btn btn-secondary flex-1 justify-center">Cancel</button>
                 <button onClick={handleCreateChannel} className="btn btn-primary flex-1 justify-center">Create Channel</button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Run Autonomous Meeting Modal */}
+        {meetingModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={() => setMeetingModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              className="w-full max-w-lg bg-white border border-[rgba(0,0,0,0.12)] rounded-3xl p-6 shadow-2xl space-y-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-[rgba(0,0,0,0.08)]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+                    <Users size={16} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-[#1E1F24]">Run Autonomous Team Meeting</h2>
+                    <p className="text-[10px] text-[#72737A]">AI Employees will convene, delegate, and execute tasks autonomously</p>
+                  </div>
+                </div>
+                <button onClick={() => setMeetingModalOpen(false)} className="btn-icon"><X size={15} /></button>
+              </div>
+
+              <form onSubmit={handleStartAutonomousMeeting} className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1.5">EXECUTIVE DIRECTIVE / COMPANY GOAL</label>
+                  <textarea
+                    value={meetingGoal}
+                    onChange={(e) => setMeetingGoal(e.target.value)}
+                    placeholder="e.g. Design and build the V2 Landing Page & Marketing Campaign with user auth and full API integrations."
+                    className="w-full h-24 p-3 rounded-2xl border border-[rgba(0,0,0,0.12)] bg-[#FAF8F5] text-xs outline-none focus:border-indigo-600 focus:bg-white transition-all text-[#1E1F24] placeholder-[#878890] resize-none"
+                    required
+                  />
+                </div>
+
+                <div className="p-3 rounded-2xl bg-indigo-50/50 border border-indigo-100/80 space-y-2">
+                  <div className="text-[10px] font-bold text-indigo-900 uppercase">ATTENDING AI EMPLOYEES</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-[#1E1F24]">
+                    <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-indigo-100 shadow-2xs">
+                      <AgentAvatar name="Zach Adams" size={20} />
+                      <div>
+                        <div className="text-[11px] font-bold">Zach Adams</div>
+                        <div className="text-[9px] text-[#878890]">Product Manager (Lead)</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-indigo-100 shadow-2xs">
+                      <AgentAvatar name="Sara Pate" size={20} />
+                      <div>
+                        <div className="text-[11px] font-bold">Sara Pate</div>
+                        <div className="text-[9px] text-[#878890]">Lead Designer</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-indigo-100 shadow-2xs">
+                      <AgentAvatar name="Peter" size={20} />
+                      <div>
+                        <div className="text-[11px] font-bold">Peter</div>
+                        <div className="text-[9px] text-[#878890]">Senior Engineer</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-indigo-100 shadow-2xs">
+                      <AgentAvatar name="Zara" size={20} />
+                      <div>
+                        <div className="text-[11px] font-bold">Zara</div>
+                        <div className="text-[9px] text-[#878890]">Marketing Specialist</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button type="button" onClick={() => setMeetingModalOpen(false)} className="btn btn-secondary flex-1 justify-center py-2.5">Cancel</button>
+                  <button type="submit" disabled={meetingStarting} className="btn bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex-1 justify-center py-2.5 gap-2 shadow-sm">
+                    {meetingStarting ? (
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles size={13} className="animate-spin" /> Starting…
+                      </span>
+                    ) : (
+                      <>
+                        <Play size={13} /> Start Meeting
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </motion.div>
         )}

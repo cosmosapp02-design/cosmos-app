@@ -310,6 +310,71 @@ export class V2Supervisor {
           },
         ]);
       } catch {}
+
+      // 6. Inter-Agent @mention Chaining & Task Extraction (Autonomous Organization)
+      try {
+        // A. Extract Task creations in response (e.g. [TASK: Design Landing Page | Sara Pate])
+        const taskMatches = Array.from(responseText.matchAll(/\[TASK:\s*([^|]+)\|?\s*([^\]]*)\]/gi));
+        for (const tm of taskMatches) {
+          const tTitle = tm[1]?.trim();
+          const tAssign = tm[2]?.trim() || agentName;
+          if (tTitle) {
+            await client.from("tasks").insert([{
+              title: tTitle,
+              assigned_to: tAssign,
+              status: "in_progress",
+              channel_id: channelId,
+              thread_id: threadId || null,
+            }]);
+          }
+        }
+
+        // B. Extract @mentions for Autonomous Inter-Agent Chaining (Safety cap <= 10 turns)
+        let threadTurnCount = 1;
+        if (threadId) {
+          const { data: tRow } = await client.from("threads").select("reply_count").eq("id", threadId).single();
+          threadTurnCount = tRow?.reply_count ?? 1;
+        }
+
+        if (threadTurnCount < 10) {
+          const mentionMatches = Array.from(responseText.matchAll(/@([a-zA-Z0-9_-]+)/g));
+          const mentionedSlugs = new Set<string>();
+
+          for (const mm of mentionMatches) {
+            const tag = mm[1].trim();
+            const tagSlug = toProfileSlug(tag);
+            if (tagSlug && tagSlug !== profileSlug && tagSlug !== "dev_bot") {
+              mentionedSlugs.add(tagSlug);
+            }
+          }
+
+          // Auto-enqueue job for each mentioned agent
+          for (const mSlug of Array.from(mentionedSlugs)) {
+            const rawKey = `auto-chain-${channelId}-${threadId || "main"}-${mSlug}-${Date.now()}`;
+            const idempotency_key = `dispatch-${mSlug}-${Date.now()}-${Math.random()}`;
+
+            await client.from("dispatch_jobs").insert([{
+              channel_id: channelId,
+              thread_id: threadId || null,
+              status: "queued",
+              context_payload: {
+                user_text: `[Meeting Update from ${agentName}]: "${responseText.slice(0, 250)}" -- Please reply with your status and updates.`,
+                sender_name: agentName,
+                sender_role: `${agentName} Agent`,
+                channel_id: channelId,
+                thread_id: threadId || null,
+                target_agent: mSlug,
+                profile_slug: mSlug,
+                dispatched_at: new Date().toISOString(),
+              },
+              idempotency_key,
+              timeout_seconds: 60,
+            }]);
+          }
+        }
+      } catch (chainErr: any) {
+        console.warn("[V2Supervisor] Chaining warning:", chainErr.message);
+      }
     } catch (err: any) {
       await client
         .from("dispatch_jobs")

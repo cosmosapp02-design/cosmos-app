@@ -214,10 +214,40 @@ export default function ProjectsView({ triggerReportMode }: ProjectsViewProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Fetch tasks from Hermes Kanban REST API
+  // Fetch tasks from Supabase tasks table & Hermes Kanban
   const fetchUserTickets = useCallback(async () => {
     setLoading(true);
     try {
+      // 1. Fetch live Supabase tasks created by agents during meetings
+      const { data: dbTasks } = await supabase
+        .from("tasks")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (dbTasks && dbTasks.length > 0) {
+        const mapped: Ticket[] = dbTasks.map((t: any, idx: number) => ({
+          id: t.id,
+          key: `COS-${100 + idx}`,
+          title: t.title,
+          assignee: t.assigned_to || "Dev",
+          assigneeColor: "#1E1F24",
+          priority: (t.priority || "medium") as any,
+          tags: ["Autonomous", "AgentTask"],
+          status: (t.status === "todo" ? "backlog" : t.status === "in_progress" ? "in-progress" : t.status === "review" ? "qa-review" : "done") as TicketStatus,
+          points: 3,
+          startDate: "Today",
+          dueDate: "Sprint",
+          epicId: "epic-1",
+          description: t.description || `Created autonomously by AI employees during meeting.`,
+          subtasks: [],
+          comments: [],
+        }));
+        setTickets(mapped);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Fallback to plugin or default
       const res = await fetch("/api/plugins/kanban/tasks?board=cosmos-enterprise-platform");
       if (res.ok) {
         const json = await res.json();
@@ -262,9 +292,16 @@ export default function ProjectsView({ triggerReportMode }: ProjectsViewProps) {
     }
   }, [selectedTicket, fetchTaskRuns]);
 
-  // Subscribe to Hermes Kanban WebSocket task_events (SSE)
+  // Subscribe to Supabase tasks Realtime channel & Hermes SSE
   useEffect(() => {
     fetchUserTickets();
+
+    const channel = supabase
+      .channel("tasks-live-kanban")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
+        fetchUserTickets();
+      })
+      .subscribe();
 
     let es: EventSource | null = null;
     try {
@@ -275,6 +312,7 @@ export default function ProjectsView({ triggerReportMode }: ProjectsViewProps) {
     } catch (e) {}
 
     return () => {
+      supabase.removeChannel(channel);
       if (es) es.close();
     };
   }, [fetchUserTickets]);

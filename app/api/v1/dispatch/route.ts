@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { supervisor } from "../../../lib/v2-supervisor";
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -136,6 +137,11 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    // 5. Trigger background supervisor processing
+    try {
+      supervisor.start();
+    } catch {}
 
     return NextResponse.json({
       success: true,
