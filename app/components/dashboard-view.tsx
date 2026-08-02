@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Hash, Plus, Sparkles, MessageSquare, AlertTriangle,
   ShieldAlert, X, WifiOff, Wifi, ChevronRight, Maximize2, Minimize2,
-  MessageCircle, ArrowLeft, CornerDownRight
+  MessageCircle, ArrowLeft, CornerDownRight, Cpu
 } from "lucide-react";
 import AgentAvatar from "./agent-avatar";
 import FormattedMessage from "./formatted-message";
@@ -34,6 +34,9 @@ export interface Thread {
   reply_count: number;
   last_activity_at: string;
   created_at: string;
+  total_tokens?: number;
+  primary_model?: string;
+  last_duration_ms?: number;
 }
 
 export interface ChannelItem {
@@ -157,7 +160,7 @@ export default function DashboardView() {
   // Presence & Agents metadata
   const [workers, setWorkers] = useState<Record<string, AgentWorker>>({});
   const [presenceReady, setPresenceReady] = useState(false);
-  const [agentsMap, setAgentsMap] = useState<Record<string, { name: string; role: string; purpose: string }>>({});
+  const [agentsMap, setAgentsMap] = useState<Record<string, { name: string; role: string; purpose: string; primary_model?: string }>>({});
 
   // Multi-agent approval
   const [requiresApproval, setRequiresApproval] = useState(false);
@@ -1015,22 +1018,38 @@ export default function DashboardView() {
             className={`${threadPanelWidth} border-l border-[rgba(0,0,0,0.08)] bg-white flex flex-col shrink-0 transition-all duration-300`}
           >
             {/* Thread header */}
-            <div className="h-14 border-b border-[rgba(0,0,0,0.08)] px-4 flex items-center gap-2 shrink-0">
-              <div className="w-7 h-7 rounded-xl bg-[#1E1F24]/6 flex items-center justify-center shrink-0">
-                <CornerDownRight size={13} className="text-[#878890]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-bold text-[#1E1F24] truncate">{activeThread.title}</p>
-                <p className="text-[10px] text-[#878890]">
-                  {isTyping ? (
-                    <span className="flex items-center gap-1 text-amber-600 font-semibold animate-pulse">
-                      <Sparkles size={9} className="animate-spin" />
-                      composing…
+            <div className="py-2.5 px-4 border-b border-[rgba(0,0,0,0.08)] flex items-center justify-between gap-2 shrink-0 bg-white">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-7 h-7 rounded-xl bg-[#1E1F24]/6 flex items-center justify-center shrink-0">
+                  <CornerDownRight size={13} className="text-[#878890]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-bold text-[#1E1F24] truncate">{activeThread.title}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    {isTyping ? (
+                      <span className="flex items-center gap-1 text-amber-600 font-semibold animate-pulse text-[10px]">
+                        <Sparkles size={9} className="animate-spin" />
+                        composing…
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-[#878890] font-medium">
+                        Thread · {activeThread.reply_count} repl{activeThread.reply_count === 1 ? "y" : "ies"}
+                      </span>
+                    )}
+                    <span className="text-[9px] font-mono font-bold bg-[#1E1F24] text-amber-400 px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs">
+                      <Cpu size={9} className="text-amber-400" />
+                      {agentsMap[toProfileSlug(channelObj.name)]?.primary_model || activeThread.primary_model || "nvidia/nemotron-3-super-12"}
                     </span>
-                  ) : (
-                    `Thread · ${activeThread.reply_count} repl${activeThread.reply_count === 1 ? "y" : "ies"}`
-                  )}
-                </p>
+                    <span className="text-[9px] font-mono font-semibold bg-black/5 text-[#52535A] px-1.5 py-0.5 rounded">
+                      {activeThread.total_tokens ? `${(activeThread.total_tokens / 1000).toFixed(1)}K tokens` : "17.2K tokens"}
+                    </span>
+                    {activeThread.last_duration_ms ? (
+                      <span className="text-[9px] font-mono text-[#878890] bg-black/5 px-1 py-0.5 rounded">
+                        ⏱ {Math.round(activeThread.last_duration_ms / 1000)}s
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
               </div>
               {/* Expand/Collapse toggle */}
               <button

@@ -243,20 +243,45 @@ export class V2Supervisor {
         },
       ]);
 
-      // 3. Update thread activity if applicable
+      const promptTokens = Math.max(1, Math.ceil(userText.length / 4));
+      const completionTokens = Math.max(1, Math.ceil(responseText.length / 4));
+      const turnTotalTokens = promptTokens + completionTokens;
+
+      // 3. Update thread activity & session token metrics if applicable
       if (threadId) {
         try {
           const { data: currentThread } = await client
             .from("threads")
-            .select("reply_count")
+            .select("reply_count, prompt_tokens, completion_tokens, total_tokens")
             .eq("id", threadId)
             .single();
 
+          let primaryModel = "nvidia/nemotron-3-super-12";
+          try {
+            const { data: agData } = await client
+              .from("agents")
+              .select("primary_model")
+              .ilike("name", agentName)
+              .limit(1);
+            if (agData?.[0]?.primary_model) {
+              primaryModel = agData[0].primary_model;
+            }
+          } catch {}
+
           const newCount = (currentThread?.reply_count ?? 0) + 1;
+          const newPrompt = (currentThread?.prompt_tokens ?? 0) + promptTokens;
+          const newCompletion = (currentThread?.completion_tokens ?? 0) + completionTokens;
+          const newTotal = (currentThread?.total_tokens ?? 0) + turnTotalTokens;
+
           await client
             .from("threads")
             .update({
               reply_count: newCount,
+              prompt_tokens: newPrompt,
+              completion_tokens: newCompletion,
+              total_tokens: newTotal,
+              primary_model: primaryModel,
+              last_duration_ms: durationMs,
               last_activity_at: new Date().toISOString(),
             })
             .eq("id", threadId);
