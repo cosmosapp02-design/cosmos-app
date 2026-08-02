@@ -257,19 +257,7 @@ export default function AgentsView() {
 
               if (data.status === "completed") {
                 if (user) {
-                  try {
-                    const newAgentObj: any = {
-                      name: newName,
-                      role: newRole,
-                      purpose: newDesc || newSoul || `${newRole} AI worker.`,
-                      primary_model: newPrimaryModel,
-                      backup_model: newBackupModel,
-                      skills: ["TypeScript", "API Integration", "Hermes Profile"],
-                      avatar_color: "#1E1F24",
-                      user_id: user.id,
-                    };
-                    await supabase.from("agents").insert([newAgentObj]);
-                  } catch (e) {}
+                  // DB agent is registered server-side in /api/v1/agents/create route with org_id
                 }
 
                 addToast(`Agent ${newName} (${newRole}) hired! Profile created.`, "success");
@@ -509,10 +497,11 @@ export default function AgentsView() {
                     type="text"
                     value={newName}
                     disabled={!!editingAgent}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="e.g. Nova-Coder"
+                    onChange={(e) => setNewName(e.target.value.replace(/[^a-zA-Z0-9]/g, ""))}
+                    placeholder="e.g. NovaCoder42"
                     className="w-full px-3 py-2 rounded-xl border border-[rgba(0,0,0,0.12)] text-xs outline-none focus:border-[#1E1F24] disabled:bg-black/5 disabled:text-[#878890] disabled:cursor-not-allowed"
                   />
+                  <p className="text-[10px] text-[#878890] mt-1 font-medium">Letters and numbers only (no spaces or symbols)</p>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-[#72737A] uppercase block mb-1">ROLE</label>

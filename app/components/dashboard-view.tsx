@@ -183,7 +183,7 @@ async function consumeSSEStream(
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function DashboardView() {
-  const { user, orgName } = useAuth();
+  const { user, orgName, orgId } = useAuth();
 
   // Channel state
   const [channels, setChannels] = useState<ChannelItem[]>([]);
@@ -234,7 +234,7 @@ export default function DashboardView() {
       const res = await fetch("/api/v1/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: activeChannelId, title }),
+        body: JSON.stringify({ channel_id: activeChannelId, title, user_id: user?.id, org_id: orgId }),
       });
       const data = await res.json();
       if (res.ok && data.thread) {
@@ -244,15 +244,20 @@ export default function DashboardView() {
         // 2. Insert CEO directive message
         const directiveText = `[EXECUTIVE DIRECTIVE FROM CEO]\nProject Goal: ${goalText}\n\nZach Adams (Product Manager): You are leading this project meeting. Immediately convene your team by issuing task cards formatted as [TASK: Task Title | AgentName] for @Sara_Pate (Design), @Peter (Engineering), and @Zara (Marketing), and outline the execution plan.`;
 
-        await supabase.from("messages").insert([{
-          channel_id: activeChannelId,
-          thread_id: newThread.id,
-          user_id: user?.id,
-          sender_name: displaySender,
-          sender_role: "Workspace CEO",
-          text: directiveText,
-          is_agent: false,
-        }]);
+        await fetch("/api/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel_id: activeChannelId,
+            thread_id: newThread.id,
+            user_id: user?.id,
+            sender_name: displaySender,
+            sender_role: "Workspace CEO",
+            text: directiveText,
+            is_agent: false,
+            org_id: orgId,
+          }),
+        });
 
         // 3. Dispatch to Zach Adams (PM) as meeting lead
         await fetch("/api/v1/dispatch", {
@@ -262,6 +267,8 @@ export default function DashboardView() {
             channel_id: activeChannelId,
             thread_id: newThread.id,
             user_text: directiveText,
+            user_id: user?.id,
+            org_id: orgId,
             sender_name: displaySender,
             sender_role: "Workspace CEO",
             target_agent: "Zach Adams",
@@ -340,8 +347,11 @@ export default function DashboardView() {
 
       let dbChannels: any[] = [];
       try {
-        const { data } = await supabase.from("channels").select("*");
-        if (data) dbChannels = data;
+        const chanRes = await fetch(`/api/v1/channels?user_id=${user?.id || ""}`);
+        if (chanRes.ok) {
+          const chanJson = await chanRes.json();
+          if (chanJson.channels) dbChannels = chanJson.channels;
+        }
       } catch {}
 
       const channelMap = new Map<string, ChannelItem>();
@@ -384,12 +394,18 @@ export default function DashboardView() {
           };
           channelMap.set(cKey, newChan);
           try {
-            await supabase.from("channels").insert([{
-              name: sc.name,
-              type: "group",
-              description: newChan.topic,
-              agents: newChan.agents,
-            }]);
+            await fetch("/api/v1/channels", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: sc.name,
+                type: "group",
+                description: newChan.topic,
+                agents: newChan.agents,
+                org_id: orgId,
+                user_id: user?.id,
+              }),
+            });
           } catch {}
         }
       }
@@ -423,33 +439,30 @@ export default function DashboardView() {
 
   const fetchThreadMessages = useCallback(async (threadId: string) => {
     try {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("id, thread_id, sender_name, sender_role, text, is_agent, created_at")
-        .eq("thread_id", threadId)
-        .order("created_at", { ascending: true })
-        .limit(200);
+      const res = await fetch(`/api/v1/messages?channel_id=${activeChannelId}&thread_id=${threadId}&limit=200`);
+      if (res.ok) {
+        const { messages: data } = await res.json();
+        if (data) {
+          const mapped: Message[] = data.map((m: any) => ({
+            id: m.id,
+            sender: m.sender_name || "Unknown",
+            role: m.sender_role || (m.is_agent ? "Agent" : "CEO"),
+            text: m.text || "",
+            time: new Date(m.created_at || Date.now()).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            isAgent: !!m.is_agent,
+            thread_id: m.thread_id,
+          }));
 
-      if (!error && data) {
-        const mapped: Message[] = data.map((m: any) => ({
-          id: m.id,
-          sender: m.sender_name || "Unknown",
-          role: m.sender_role || (m.is_agent ? "Agent" : "CEO"),
-          text: m.text || "",
-          time: new Date(m.created_at || Date.now()).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          isAgent: !!m.is_agent,
-          thread_id: m.thread_id,
-        }));
-
-        setThreadMessages((prev) => {
-          const existing = prev[threadId] || [];
-          const dbIds = new Set(mapped.map((m) => m.id));
-          const localOnly = existing.filter((m) => m.isStreaming || !dbIds.has(m.id));
-          return { ...prev, [threadId]: [...mapped, ...localOnly] };
-        });
+          setThreadMessages((prev) => {
+            const existing = prev[threadId] || [];
+            const dbIds = new Set(mapped.map((m) => m.id));
+            const localOnly = existing.filter((m) => m.isStreaming || !dbIds.has(m.id));
+            return { ...prev, [threadId]: [...mapped, ...localOnly] };
+          });
+        }
       }
     } catch {}
   }, []);
@@ -594,10 +607,20 @@ export default function DashboardView() {
     if (!newChannelName.trim()) return;
     const formattedName = newChannelName.toLowerCase().replace(/\s+/g, "-");
     try {
-      const { data, error } = await supabase
-        .from("channels").insert([{ name: formattedName, type: "group", description: newChannelTopic || "Channel topic", user_id: user?.id }]).select();
-      if (!error && data?.[0]) {
-        const item: ChannelItem = { id: data[0].id, name: data[0].name, type: "group", topic: data[0].description, agents: ["Dev-Bot"], unread: 0 };
+      const res = await fetch("/api/v1/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formattedName,
+          type: "group",
+          description: newChannelTopic || "Channel topic",
+          user_id: user?.id,
+          org_id: orgId,
+        }),
+      });
+      const resData = await res.json();
+      if (res.ok && resData.channel) {
+        const item: ChannelItem = { id: resData.channel.id, name: resData.channel.name, type: "group", topic: resData.channel.description, agents: ["Dev-Bot"], unread: 0 };
         setChannels((prev) => [...prev, item]);
         setActiveChannelId(item.id);
         addToast(`Channel #${formattedName} created!`, "success");
@@ -692,7 +715,7 @@ export default function DashboardView() {
       const res = await fetch("/api/v1/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: activeChannelId, title: userText }),
+        body: JSON.stringify({ channel_id: activeChannelId, title: userText, user_id: user?.id, org_id: orgId }),
       });
       const data = await res.json();
       if (res.ok && data.thread) {
@@ -734,23 +757,28 @@ export default function DashboardView() {
       [threadId]: [...(prev[threadId] || []), userMsg],
     }));
 
-    // 4. Persist user message
+    // 4. Persist user message (via server API to avoid RLS issues with browser client)
     try {
-      const { data } = await supabase.from("messages").insert([{
-        channel_id: newThread.channel_id,
-        thread_id: threadId,
-        user_id: user?.id,
-        sender_name: displaySender,
-        sender_role: "Workspace CEO",
-        text: userText,
-        is_agent: false,
-      }]).select("id");
-
-      if (data?.[0]?.id) {
+      const msgRes = await fetch("/api/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: newThread.channel_id,
+          thread_id: threadId,
+          user_id: user?.id,
+          sender_name: displaySender,
+          sender_role: "Workspace CEO",
+          text: userText,
+          is_agent: false,
+          org_id: orgId,
+        }),
+      });
+      const msgData = await msgRes.json();
+      if (msgData?.message?.id) {
         setThreadMessages((prev) => ({
           ...prev,
           [threadId]: (prev[threadId] || []).map((m) =>
-            m.id === userMsgId ? { ...m, id: data[0].id } : m
+            m.id === userMsgId ? { ...m, id: msgData.message.id } : m
           ),
         }));
       }
@@ -784,6 +812,8 @@ export default function DashboardView() {
           channel_id: newThread.channel_id,
           thread_id: threadId,
           user_text: userText,
+          user_id: user?.id,
+          org_id: orgId,
           sender_name: displaySender,
           sender_role: "Workspace CEO",
         }),
@@ -821,23 +851,28 @@ export default function DashboardView() {
       [threadId]: [...(prev[threadId] || []), userMsg],
     }));
 
-    // Persist
+    // Persist (via server API to avoid RLS issues with browser client)
     try {
-      const { data } = await supabase.from("messages").insert([{
-        channel_id: activeThread.channel_id,
-        thread_id: threadId,
-        user_id: user?.id,
-        sender_name: displaySender,
-        sender_role: "Workspace CEO",
-        text: userText,
-        is_agent: false,
-      }]).select("id");
-
-      if (data?.[0]?.id) {
+      const msgRes = await fetch("/api/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: activeThread.channel_id,
+          thread_id: threadId,
+          user_id: user?.id,
+          sender_name: displaySender,
+          sender_role: "Workspace CEO",
+          text: userText,
+          is_agent: false,
+          org_id: orgId,
+        }),
+      });
+      const msgData = await msgRes.json();
+      if (msgData?.message?.id) {
         setThreadMessages((prev) => ({
           ...prev,
           [threadId]: (prev[threadId] || []).map((m) =>
-            m.id === userMsgId ? { ...m, id: data[0].id } : m
+            m.id === userMsgId ? { ...m, id: msgData.message.id } : m
           ),
         }));
       }
@@ -879,6 +914,8 @@ export default function DashboardView() {
           channel_id: activeThread.channel_id,
           thread_id: threadId,
           user_text: userText,
+          user_id: user?.id,
+          org_id: orgId,
           sender_name: displaySender,
           sender_role: "Workspace CEO",
         }),

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { Client } from "pg";
 import crypto from "crypto";
-import { supervisor } from "../../../lib/v2-supervisor";
+import { dispatchToAgent } from "../../../../relay/server";
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -9,9 +10,41 @@ const SUPABASE_URL =
 const SUPABASE_ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyZ3VpYndza2tsam9nb2d0dGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MjExNzgsImV4cCI6MjEwMTE5NzE3OH0.b1t0l8_lNDfg06ruSLa_ru9K3TU5bD5SGnSLVdILNbY";
+const SUPABASE_SERVICE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
+const DB_URL = process.env.DATABASE_URL!;
 
+const FALLBACK_ORG_ID = "00000000-0000-0000-0000-000000000001";
+
+/** Anon client — for reading public/authenticated context in requests */
 function sb() {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+/** Service role client — for trusted server-side DB writes that bypass RLS */
+function sbAdmin() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+}
+
+/**
+ * Resolves the org_id for a given userId via direct Postgres query.
+ * Falls back to FALLBACK_ORG_ID if userId is empty or has no membership.
+ */
+async function resolveOrgId(userId: string | undefined): Promise<string> {
+  if (!userId || !DB_URL) return FALLBACK_ORG_ID;
+  const db = new Client({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+  try {
+    await db.connect();
+    const res = await db.query(
+      `SELECT org_id FROM org_members WHERE user_id = $1 LIMIT 1`,
+      [userId]
+    );
+    return res.rows.length > 0 ? res.rows[0].org_id : FALLBACK_ORG_ID;
+  } catch {
+    return FALLBACK_ORG_ID;
+  } finally {
+    await db.end();
+  }
 }
 
 function toProfileSlug(name: string): string {
@@ -30,17 +63,12 @@ const AGENT_REGISTRY = [
   { name: "Zara", slug: "zara", patterns: ["@Zara", "@zara"] },
 ];
 
-/**
- * Parse EXPLICIT @mention tags from user text and return agents in order of appearance.
- * Only matches strings beginning with @, never naked names like "Peter" or "Zara".
- */
 function parseMentionedAgents(text: string): { name: string; slug: string; index: number }[] {
   const found: { name: string; slug: string; index: number }[] = [];
   const seen = new Set<string>();
 
   for (const ag of AGENT_REGISTRY) {
     for (const pattern of ag.patterns) {
-      // Case-insensitive whole-word match for @pattern
       const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
       let m: RegExpExecArray | null;
       while ((m = regex.exec(text)) !== null) {
@@ -58,8 +86,10 @@ function parseMentionedAgents(text: string): { name: string; slug: string; index
 
 /**
  * POST /api/v1/dispatch
- * Receives user chat input, resolves agent target, enforces guardrails,
- * and enqueues a dispatch_jobs row in Supabase for the local supervisor.
+ * Gateway Protocol Dispatch Route:
+ * 1. Saves user message to `messages` with `org_id`.
+ * 2. Checks `agent_workers` for online status in `org_id`.
+ * 3. Pushes directly to Gateway Relay if online, or queues in `dispatch_jobs` if offline.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -70,7 +100,13 @@ export async function POST(req: NextRequest) {
       user_text,
       sender_name = "CEO",
       sender_role = "Workspace CEO",
+      user_id,
     } = body;
+
+    // Resolve org_id from the authenticated user's membership (server-side, trusted)
+    const org_id = body.org_id && body.org_id !== FALLBACK_ORG_ID
+      ? body.org_id
+      : await resolveOrgId(user_id);
 
     if (!channel_id || !user_text) {
       return NextResponse.json(
@@ -81,10 +117,8 @@ export async function POST(req: NextRequest) {
 
     const client = sb();
 
-    // 1. Resolve channel or explicit target_agent or @mentions in payload
-    let channelName = "general";
+    // 1. Resolve Target Agent Name & Profile Slug
     let targetAgentName = body.target_agent || body.target_agent_name || "";
-
     if (!targetAgentName) {
       const mentions = parseMentionedAgents(user_text);
       if (mentions.length > 0) {
@@ -100,20 +134,8 @@ export async function POST(req: NextRequest) {
           .eq("id", channel_id)
           .single();
 
-        if (chanData) {
-          channelName = chanData.name || "general";
-          if (chanData.agents && chanData.agents.length > 0) {
-            targetAgentName = chanData.agents[0];
-          } else if (chanData.topic && chanData.topic.includes("/p/")) {
-            const match = chanData.topic.match(/\/p\/([a-z0-9_-]+)/i);
-            if (match) targetAgentName = match[1];
-          } else if (
-            channelName !== "general" &&
-            channelName !== "sprint-planning" &&
-            !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(channelName)
-          ) {
-            targetAgentName = channelName;
-          }
+        if (chanData && chanData.agents && chanData.agents.length > 0) {
+          targetAgentName = chanData.agents[0];
         }
       } catch {}
     }
@@ -124,12 +146,12 @@ export async function POST(req: NextRequest) {
 
     const profileSlug = toProfileSlug(targetAgentName);
 
-    // 2. Resolve target agent row from DB
+    // 2. Resolve Agent Row from DB
     let agentId: string | null = null;
     try {
       const { data: agentData } = await client
         .from("agents")
-        .select("id, status")
+        .select("id, status, org_id")
         .ilike("name", targetAgentName)
         .limit(1);
 
@@ -144,9 +166,38 @@ export async function POST(req: NextRequest) {
       }
     } catch {}
 
-    // 3. Create idempotency key & context payload
-    const rawKey = `${channel_id}-${thread_id || "main"}-${Date.now()}-${Math.random()}`;
-    const idempotency_key = `dispatch-${crypto.createHash("md5").update(rawKey).digest("hex")}`;
+    // 3. Save User Message to `messages` table with org_id (service role bypasses RLS for server writes)
+    const adminClient = sbAdmin();
+    try {
+      const { error: msgErr } = await adminClient.from("messages").insert([
+        {
+          channel_id,
+          thread_id: thread_id || null,
+          sender_name,
+          sender_role,
+          text: user_text,
+          is_agent: false,
+          org_id,
+        },
+      ]);
+      if (msgErr) console.warn("[Dispatch Route] Warning saving user message:", msgErr.message);
+    } catch (msgErr: any) {
+      console.warn("[Dispatch Route] Warning saving user message:", msgErr.message);
+    }
+
+    // 4. Check Presence (`agent_workers` table)
+    let isOnline = false;
+    try {
+      const { data: workerData } = await client
+        .from("agent_workers")
+        .select("status")
+        .eq("agent_profile", profileSlug)
+        .single();
+
+      if (workerData && workerData.status === "online") {
+        isOnline = true;
+      }
+    } catch {}
 
     const context_payload = {
       user_text,
@@ -156,17 +207,39 @@ export async function POST(req: NextRequest) {
       thread_id: thread_id || null,
       target_agent: targetAgentName,
       profile_slug: profileSlug,
+      org_id,
       dispatched_at: new Date().toISOString(),
     };
 
-    // 4. Write dispatch_job row
-    const { data: job, error } = await client
+    // 5. Route Message over Gateway Relay or Queue Offline
+    if (isOnline && agentId) {
+      try {
+        const dispatchRes = await dispatchToAgent(agentId, context_payload, channel_id, thread_id);
+        return NextResponse.json({
+          success: true,
+          status: "delivered",
+          job_id: dispatchRes.jobId,
+          sequence: dispatchRes.sequence,
+          target_agent: targetAgentName,
+          profile_slug: profileSlug,
+        });
+      } catch (relayErr: any) {
+        console.warn("[Dispatch Route] Relay dispatch fallback to queue:", relayErr.message);
+      }
+    }
+
+    // Fallback or Offline Queueing
+    const rawKey = `${channel_id}-${thread_id || "main"}-${Date.now()}-${Math.random()}`;
+    const idempotency_key = `dispatch-${crypto.createHash("md5").update(rawKey).digest("hex")}`;
+
+    const { data: job, error } = await adminClient
       .from("dispatch_jobs")
       .insert([
         {
           channel_id,
           thread_id: thread_id || null,
           agent_id: agentId,
+          org_id,
           status: "queued",
           context_payload,
           idempotency_key,
@@ -179,11 +252,6 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-
-    // 5. Trigger background supervisor processing
-    try {
-      supervisor.start();
-    } catch {}
 
     return NextResponse.json({
       success: true,
@@ -198,10 +266,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/**
- * GET /api/v1/dispatch?job_id=...
- * Checks status of a dispatch job.
- */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const jobId = searchParams.get("job_id");
