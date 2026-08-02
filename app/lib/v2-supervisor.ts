@@ -1,10 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -14,7 +10,6 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyZ3VpYndza2tsam9nb2d0dGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MjExNzgsImV4cCI6MjEwMTE5NzE3OH0.b1t0l8_lNDfg06ruSLa_ru9K3TU5bD5SGnSLVdILNbY";
 
 const PROFILES_DIR = "/Users/cosmos/.hermes/profiles";
-const HERMES_BIN = "/Users/cosmos/.hermes/hermes-agent/venv/bin/hermes";
 
 function sb() {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -46,7 +41,7 @@ export class V2Supervisor {
     this.subscribeRealtimeJobs();
 
     // 3. Fallback poll & heartbeat loops
-    this.pollTimer = setInterval(() => this.pollQueuedJobs(), 20_000);
+    this.pollTimer = setInterval(() => this.pollQueuedJobs(), 15_000);
     this.heartbeatTimer = setInterval(() => this.sendHeartbeats(), 15_000);
 
     // Initial heartbeat
@@ -174,33 +169,62 @@ export class V2Supervisor {
     const channelId = payload.channel_id;
     const threadId = payload.thread_id;
     const agentName = payload.target_agent || "Dev-Bot";
+    const isSystemChannel = profileSlug === "general" || profileSlug === "sprint_planning";
 
     try {
-      // 2. Invoke Hermes for this profile with isolated HERMES_HOME
       const startTime = Date.now();
-
-      // Escape input for shell execution
-      const sanitizedInput = userText.replace(/'/g, "'\\''");
       const profileDir = path.join(PROFILES_DIR, profileSlug);
 
-      // Execute hermes via HTTP Gateway endpoint (or hermes -z runner)
-      const command = `HERMES_HOME="${profileDir}" ${HERMES_BIN} chat --non-interactive --message "${sanitizedInput}" 2>/dev/null || curl -s -X POST "http://127.0.0.1:8642/p/${profileSlug}/v1/chat/completions" -H "Content-Type: application/json" -H "Authorization: Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef" -d '{"model":"hermes-agent","messages":[{"role":"user","content":"${sanitizedInput}"}]}'`;
+      // Read SOUL.md persona file for this profile
+      let soulContent = `You are ${agentName}, working as an AI worker in this organization.`;
+      const soulPath = path.join(profileDir, "SOUL.md");
+      if (fs.existsSync(soulPath)) {
+        try {
+          soulContent = fs.readFileSync(soulPath, "utf-8");
+        } catch {}
+      }
+
+      // Target Hermes gateway HTTP completion endpoint
+      const targetUrl = isSystemChannel
+        ? "http://127.0.0.1:8642/v1/chat/completions"
+        : `http://127.0.0.1:8642/p/${profileSlug}/v1/chat/completions`;
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Authorization: "Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef",
+      };
+
+      if (threadId) {
+        headers["X-Hermes-Session-Id"] = `session-thread-${threadId}`;
+      }
+
+      const messages = [
+        { role: "system", content: soulContent },
+        { role: "user", content: `/new\n${userText}` },
+      ];
 
       let responseText = "";
+
       try {
-        const { stdout } = await execAsync(command, { timeout: 45_000 });
-        if (stdout.trim().startsWith("{")) {
-          const parsed = JSON.parse(stdout);
-          responseText = parsed.choices?.[0]?.message?.content || stdout;
-        } else {
-          responseText = stdout.trim();
+        const res = await fetch(targetUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: "hermes-agent",
+            messages,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          responseText = data.choices?.[0]?.message?.content || "";
         }
-      } catch (execErr: any) {
-        responseText = execErr.stdout ? execErr.stdout.trim() : `I am ${agentName}. I received your task in ${channelId}.`;
+      } catch (e: any) {
+        console.warn("[V2Supervisor] Gateway fetch warning:", e.message);
       }
 
       if (!responseText) {
-        responseText = `Task received by ${agentName}. Processing complete.`;
+        responseText = `Hi! I am ${agentName}. I received your message: "${userText}"`;
       }
 
       const durationMs = Date.now() - startTime;
@@ -217,7 +241,7 @@ export class V2Supervisor {
         },
       ]);
 
-      // 4. Update thread if applicable
+      // 4. Update thread reply count & activity if applicable
       if (threadId) {
         try {
           const { data: currentThread } = await client

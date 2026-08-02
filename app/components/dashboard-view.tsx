@@ -693,23 +693,9 @@ export default function DashboardView() {
     const streamMsgId = `streaming-${Date.now()}`;
 
     setIsTyping(true);
-    setThreadMessages((prev) => ({
-      ...prev,
-      [threadId]: [...(prev[threadId] || []), {
-        id: streamMsgId,
-        sender: agentName,
-        role: agentRole,
-        text: "",
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        isStreaming: true,
-        isAgent: true,
-        thread_id: threadId,
-      }],
-    }));
-
-    // Enqueue dispatch job in Supabase queue
+    // Enqueue dispatch job in Supabase queue for single worker execution
     try {
-      fetch("/api/v1/dispatch", {
+      await fetch("/api/v1/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -719,51 +705,8 @@ export default function DashboardView() {
           sender_name: displaySender,
           sender_role: "Workspace CEO",
         }),
-      }).catch(() => {});
+      });
     } catch {}
-
-    await callAgent({
-      profileSlug: isSystemChannel ? "" : profileSlug,
-      isGeneral: isSystemChannel,
-      sessionId,
-      contextMessages: [{ role: "user", content: `/new\n${userText}` }],
-      onStreamMsg: (text) => {
-        setThreadMessages((prev) => ({
-          ...prev,
-          [threadId]: (prev[threadId] || []).map((m) =>
-            m.id === streamMsgId ? { ...m, text, isStreaming: true } : m
-          ),
-        }));
-      },
-      streamMsgId,
-      setMsgs: setThreadMessages,
-      onComplete: async (finalText) => {
-        setThreadMessages((prev) => ({
-          ...prev,
-          [threadId]: (prev[threadId] || []).map((m) =>
-            m.id === streamMsgId ? { ...m, text: finalText, isStreaming: false } : m
-          ),
-        }));
-
-        // Persist agent reply
-        try {
-          await supabase.from("messages").insert([{
-            channel_id: newThread.channel_id,
-            thread_id: threadId,
-            sender_name: agentName,
-            sender_role: agentRole,
-            text: finalText,
-            is_agent: true,
-          }]);
-        } catch {}
-
-        // Update thread reply count
-        try {
-          await fetch(`/api/v1/threads?thread_id=${threadId}`, { method: "PATCH" });
-          fetchThreads(activeChannelId);
-        } catch {}
-      },
-    });
   };
 
   // ── Reply in thread ───────────────────────────────────────────────────────
@@ -845,23 +788,9 @@ export default function DashboardView() {
     const streamMsgId = `streaming-reply-${Date.now()}`;
 
     setIsTyping(true);
-    setThreadMessages((prev) => ({
-      ...prev,
-      [threadId]: [...(prev[threadId] || []), {
-        id: streamMsgId,
-        sender: agentName,
-        role: agentRole,
-        text: "",
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        isStreaming: true,
-        isAgent: true,
-        thread_id: threadId,
-      }],
-    }));
-
-    // Enqueue dispatch job in Supabase queue
+    // Enqueue dispatch job in Supabase queue for single worker execution
     try {
-      fetch("/api/v1/dispatch", {
+      await fetch("/api/v1/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -871,49 +800,8 @@ export default function DashboardView() {
           sender_name: displaySender,
           sender_role: "Workspace CEO",
         }),
-      }).catch(() => {});
+      });
     } catch {}
-
-    await callAgent({
-      profileSlug: isSystemChannel ? "" : profileSlug,
-      isGeneral: isSystemChannel,
-      sessionId,
-      contextMessages,
-      onStreamMsg: (text) => {
-        setThreadMessages((prev) => ({
-          ...prev,
-          [threadId]: (prev[threadId] || []).map((m) =>
-            m.id === streamMsgId ? { ...m, text, isStreaming: true } : m
-          ),
-        }));
-      },
-      streamMsgId,
-      setMsgs: setThreadMessages,
-      onComplete: async (finalText) => {
-        setThreadMessages((prev) => ({
-          ...prev,
-          [threadId]: (prev[threadId] || []).map((m) =>
-            m.id === streamMsgId ? { ...m, text: finalText, isStreaming: false } : m
-          ),
-        }));
-
-        try {
-          await supabase.from("messages").insert([{
-            channel_id: activeThread.channel_id,
-            thread_id: threadId,
-            sender_name: agentName,
-            sender_role: agentRole,
-            text: finalText,
-            is_agent: true,
-          }]);
-        } catch {}
-
-        try {
-          await fetch(`/api/v1/threads?thread_id=${threadId}`, { method: "PATCH" });
-          fetchThreads(activeChannelId);
-        } catch {}
-      },
-    });
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────
