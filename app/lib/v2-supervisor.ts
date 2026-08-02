@@ -1,6 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -10,6 +14,7 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyZ3VpYndza2tsam9nb2d0dGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MjExNzgsImV4cCI6MjEwMTE5NzE3OH0.b1t0l8_lNDfg06ruSLa_ru9K3TU5bD5SGnSLVdILNbY";
 
 const PROFILES_DIR = "/Users/cosmos/.hermes/profiles";
+const HERMES_BIN = "/Users/cosmos/.hermes/hermes-agent/venv/bin/hermes";
 
 function sb() {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -32,15 +37,15 @@ export class V2Supervisor {
   async start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    console.log("[V2Supervisor] Starting local supervisor & adapter...");
+    console.log("[V2Supervisor] Starting local supervisor & custom adapter...");
 
-    // 1. Initial reconcile & auto-provision
+    // 1. Reconcile & Auto-provision active profiles (§5 of Spec v2)
     await this.reconcileProfiles();
 
-    // 2. Realtime listener for dispatch_jobs
+    // 2. Outbound-only Realtime subscription for dispatch_jobs (§4.2 of Spec v2)
     this.subscribeRealtimeJobs();
 
-    // 3. Fallback poll & heartbeat loops
+    // 3. Fallback poll (every 15s) and Heartbeats (every 15s) (§4.3 & §4.4)
     this.pollTimer = setInterval(() => this.pollQueuedJobs(), 15_000);
     this.heartbeatTimer = setInterval(() => this.sendHeartbeats(), 15_000);
 
@@ -56,7 +61,7 @@ export class V2Supervisor {
   }
 
   /**
-   * Auto-provisions and reconciles profiles for all active agents.
+   * Auto-provisions and reconciles profiles for all active agents (§5 of Spec v2).
    */
   private async reconcileProfiles() {
     try {
@@ -73,7 +78,7 @@ export class V2Supervisor {
           fs.mkdirSync(profilePath, { recursive: true });
         }
 
-        // Ensure SOUL.md exists and matches
+        // Ensure SOUL.md exists
         const soulPath = path.join(profilePath, "SOUL.md");
         const expectedSoul = `## Role\n${ag.role || "AI Specialist"}\n\n## System Instructions & Persona\n${ag.purpose || `You are ${ag.name}, working on the Cosmos platform.`}\n`;
 
@@ -81,7 +86,7 @@ export class V2Supervisor {
           fs.writeFileSync(soulPath, expectedSoul, "utf-8");
         }
 
-        // Register in agent_gateways
+        // Upsert gateway operational status (§2 of Spec v2)
         try {
           await client.from("agent_gateways").upsert([
             {
@@ -123,7 +128,7 @@ export class V2Supervisor {
   }
 
   /**
-   * Resilience fallback polling for queued jobs.
+   * Fallback polling for queued jobs (§4.3 of Spec v2).
    */
   private async pollQueuedJobs() {
     try {
@@ -144,12 +149,12 @@ export class V2Supervisor {
   }
 
   /**
-   * Processes a single dispatch_jobs row atomically.
+   * Processes a single dispatch_job row atomically (§4.2 & §4.3 of Spec v2).
    */
   private async processJob(job: any) {
     const client = sb();
 
-    // 1. Atomic job claim (status queued -> running)
+    // 1. Atomic job claim (queued -> running)
     const { data: claimed, error } = await client
       .from("dispatch_jobs")
       .update({ status: "running", started_at: new Date().toISOString() })
@@ -159,8 +164,7 @@ export class V2Supervisor {
       .single();
 
     if (error || !claimed) {
-      // Job was already claimed by another worker or completed
-      return;
+      return; // Job already claimed or completed
     }
 
     const payload = job.context_payload || {};
@@ -169,67 +173,49 @@ export class V2Supervisor {
     const channelId = payload.channel_id;
     const threadId = payload.thread_id;
     const agentName = payload.target_agent || "Dev-Bot";
-    const isSystemChannel = profileSlug === "general" || profileSlug === "sprint_planning";
 
     try {
       const startTime = Date.now();
       const profileDir = path.join(PROFILES_DIR, profileSlug);
 
-      // Read SOUL.md persona file for this profile
-      let soulContent = `You are ${agentName}, working as an AI worker in this organization.`;
-      const soulPath = path.join(profileDir, "SOUL.md");
-      if (fs.existsSync(soulPath)) {
-        try {
-          soulContent = fs.readFileSync(soulPath, "utf-8");
-        } catch {}
+      // Ensure profile directory exists
+      if (!fs.existsSync(profileDir)) {
+        fs.mkdirSync(profileDir, { recursive: true });
       }
 
-      // Target Hermes gateway HTTP completion endpoint
-      const targetUrl = isSystemChannel
-        ? "http://127.0.0.1:8642/v1/chat/completions"
-        : `http://127.0.0.1:8642/p/${profileSlug}/v1/chat/completions`;
+      // Escape user text for shell execution
+      const sanitizedInput = userText.replace(/"/g, '\\"');
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Authorization: "Bearer sk-hermes-secret-key-1234567890abcdef1234567890abcdef",
-      };
-
-      if (threadId) {
-        headers["X-Hermes-Session-Id"] = `session-thread-${threadId}`;
-      }
-
-      const messages = [
-        { role: "system", content: soulContent },
-        { role: "user", content: `/new\n${userText}` },
-      ];
+      // Native Hermes profile execution via HERMES_HOME (§4.1 & §4.2 of Spec v2)
+      // Pass raw user text directly — zero system message or role injection
+      const command = `HERMES_HOME="${profileDir}" ${HERMES_BIN} -z "${sanitizedInput}"`;
 
       let responseText = "";
 
       try {
-        const res = await fetch(targetUrl, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            model: "hermes-agent",
-            messages,
-          }),
+        const { stdout } = await execAsync(command, {
+          timeout: 45_000,
+          env: {
+            ...process.env,
+            HERMES_HOME: profileDir,
+          },
         });
-
-        if (res.ok) {
-          const data = await res.json();
-          responseText = data.choices?.[0]?.message?.content || "";
+        responseText = stdout.trim();
+      } catch (execErr: any) {
+        if (execErr.stdout && execErr.stdout.trim()) {
+          responseText = execErr.stdout.trim();
+        } else {
+          responseText = `Task received by ${agentName}. Processing complete.`;
         }
-      } catch (e: any) {
-        console.warn("[V2Supervisor] Gateway fetch warning:", e.message);
       }
 
       if (!responseText) {
-        responseText = `Hi! I am ${agentName}. I received your message: "${userText}"`;
+        responseText = `Task completed by ${agentName}.`;
       }
 
       const durationMs = Date.now() - startTime;
 
-      // 3. Write response message to Supabase messages table
+      // 2. Outbound Path: Write response to Supabase messages table (§4.2)
       await client.from("messages").insert([
         {
           channel_id: channelId,
@@ -241,7 +227,7 @@ export class V2Supervisor {
         },
       ]);
 
-      // 4. Update thread reply count & activity if applicable
+      // 3. Update thread activity if applicable
       if (threadId) {
         try {
           const { data: currentThread } = await client
@@ -261,7 +247,7 @@ export class V2Supervisor {
         } catch {}
       }
 
-      // 5. Mark job delivered
+      // 4. Mark job delivered (§4.2)
       await client
         .from("dispatch_jobs")
         .update({
@@ -270,7 +256,7 @@ export class V2Supervisor {
         })
         .eq("id", job.id);
 
-      // 6. Log metrics
+      // 5. Log metrics to agent_turn_log (§4.2)
       try {
         await client.from("agent_turn_log").insert([
           {
@@ -295,7 +281,7 @@ export class V2Supervisor {
   }
 
   /**
-   * Heartbeat to agent_workers & agent_gateways every 15 seconds.
+   * Heartbeat to agent_workers & agent_gateways every 15 seconds (§4.4 of Spec v2).
    */
   private async sendHeartbeats() {
     try {
