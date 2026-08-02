@@ -210,7 +210,7 @@ export default function DashboardView() {
           is_agent: false,
         }]);
 
-        // 3. Dispatch to Zach Adams (PM)
+        // 3. Dispatch to Zach Adams (PM) as meeting lead
         await fetch("/api/v1/dispatch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -220,6 +220,7 @@ export default function DashboardView() {
             user_text: directiveText,
             sender_name: displaySender,
             sender_role: "Workspace CEO",
+            target_agent: "Zach Adams",
           }),
         });
 

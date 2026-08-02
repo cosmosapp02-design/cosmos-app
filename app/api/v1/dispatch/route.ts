@@ -48,33 +48,35 @@ export async function POST(req: NextRequest) {
 
     const client = sb();
 
-    // 1. Resolve channel to get name/agent target
+    // 1. Resolve channel or explicit target_agent in payload
     let channelName = "general";
-    let targetAgentName = "";
+    let targetAgentName = body.target_agent || body.target_agent_name || "";
 
-    try {
-      const { data: chanData } = await client
-        .from("channels")
-        .select("name, agents, topic")
-        .eq("id", channel_id)
-        .single();
+    if (!targetAgentName) {
+      try {
+        const { data: chanData } = await client
+          .from("channels")
+          .select("name, agents, topic")
+          .eq("id", channel_id)
+          .single();
 
-      if (chanData) {
-        channelName = chanData.name || "general";
-        if (chanData.agents && chanData.agents.length > 0) {
-          targetAgentName = chanData.agents[0];
-        } else if (chanData.topic && chanData.topic.includes("/p/")) {
-          const match = chanData.topic.match(/\/p\/([a-z0-9_-]+)/i);
-          if (match) targetAgentName = match[1];
-        } else if (
-          channelName !== "general" &&
-          channelName !== "sprint-planning" &&
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(channelName)
-        ) {
-          targetAgentName = channelName;
+        if (chanData) {
+          channelName = chanData.name || "general";
+          if (chanData.agents && chanData.agents.length > 0) {
+            targetAgentName = chanData.agents[0];
+          } else if (chanData.topic && chanData.topic.includes("/p/")) {
+            const match = chanData.topic.match(/\/p\/([a-z0-9_-]+)/i);
+            if (match) targetAgentName = match[1];
+          } else if (
+            channelName !== "general" &&
+            channelName !== "sprint-planning" &&
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(channelName)
+          ) {
+            targetAgentName = channelName;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     if (!targetAgentName) {
       targetAgentName = "Dev-Bot";
