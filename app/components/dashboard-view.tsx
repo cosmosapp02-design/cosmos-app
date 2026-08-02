@@ -346,22 +346,7 @@ export default function DashboardView() {
 
       const channelMap = new Map<string, ChannelItem>();
 
-      channelMap.set("general", {
-        id: "ch-general",
-        name: "general",
-        type: "group",
-        topic: "General discussions & Dev-Bot",
-        agents: ["Dev-Bot"],
-        unread: 0,
-      });
-      channelMap.set("sprint-planning", {
-        id: "ch-sprint-planning",
-        name: "sprint-planning",
-        type: "group",
-        topic: "Sprint planning & Team Collaboration",
-        agents: ["Dev-Bot", "Peter"],
-        unread: 0,
-      });
+      // Only populate from Supabase DB — no hardcoded defaults
 
       dbChannels.forEach((c: any) => {
         const normName = (c.name || "").toLowerCase().replace(/-agent$/, "").trim();

@@ -247,18 +247,10 @@ export default function ProjectsView({ triggerReportMode }: ProjectsViewProps) {
         return;
       }
 
-      // 2. Fallback to plugin or default
-      const res = await fetch("/api/plugins/kanban/tasks?board=cosmos-enterprise-platform");
-      if (res.ok) {
-        const json = await res.json();
-        if (json.tasks && Array.isArray(json.tasks) && json.tasks.length > 0) {
-          setTickets(json.tasks);
-          return;
-        }
-      }
-      setTickets(INITIAL_TICKETS);
+      // 2. Fallback: empty board when no tasks exist
+      setTickets([]);
     } catch (e) {
-      setTickets(INITIAL_TICKETS);
+      setTickets([]);
     } finally {
       setLoading(false);
     }
